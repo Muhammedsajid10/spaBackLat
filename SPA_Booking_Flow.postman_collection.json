@@ -1,0 +1,230 @@
+{
+  "info": {
+    "name": "SPA Booking Flow",
+    "description": "Complete booking flow testing for SPA backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Get Available Services",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/v1/bookings/services",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "bookings", "services"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "2. Get Available Professionals",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/v1/bookings/professionals?serviceId={{service_id}}&date=2024-01-15",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "bookings", "professionals"],
+          "query": [
+            {
+              "key": "serviceId",
+              "value": "{{service_id}}"
+            },
+            {
+              "key": "date",
+              "value": "2024-01-15"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "3. Get Available Time Slots",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/v1/bookings/time-slots?employeeId={{employee_id}}&serviceId={{service_id}}&date=2024-01-15",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "bookings", "time-slots"],
+          "query": [
+            {
+              "key": "employeeId",
+              "value": "{{employee_id}}"
+            },
+            {
+              "key": "serviceId",
+              "value": "{{service_id}}"
+            },
+            {
+              "key": "date",
+              "value": "2024-01-15"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "4. Create Booking Confirmation",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"serviceId\": \"{{service_id}}\",\n  \"employeeId\": \"{{employee_id}}\",\n  \"appointmentDate\": \"2024-01-15\",\n  \"startTime\": \"{{start_time}}\",\n  \"clientNotes\": \"Please use lavender oil\",\n  \"specialRequests\": [\"extra towels\", \"quiet room\"]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/bookings/confirmation",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "bookings", "confirmation"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "5a. User Registration",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"firstName\": \"John\",\n  \"lastName\": \"Client\",\n  \"email\": \"john.client@example.com\",\n  \"password\": \"password123\",\n  \"phone\": \"+1234567890\",\n  \"dateOfBirth\": \"1990-01-01\",\n  \"gender\": \"male\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/auth/signup",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "auth", "signup"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "5b. User Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"john.client@example.com\",\n  \"password\": \"password123\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/auth/login",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "auth", "login"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "6. Complete Booking",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{auth_token}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"confirmationToken\": \"{{confirmation_token}}\",\n  \"serviceId\": \"{{service_id}}\",\n  \"employeeId\": \"{{employee_id}}\",\n  \"appointmentDate\": \"2024-01-15\",\n  \"startTime\": \"{{start_time}}\",\n  \"clientNotes\": \"Please use lavender oil\",\n  \"specialRequests\": [\"extra towels\", \"quiet room\"]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/bookings/complete",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "bookings", "complete"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Bonus: Facebook Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"accessToken\": \"facebook_access_token_here\",\n  \"userID\": \"facebook_user_id_here\",\n  \"email\": \"user@example.com\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/auth/facebook",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "auth", "facebook"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Bonus: Google Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"idToken\": \"google_id_token_here\",\n  \"accessToken\": \"google_access_token_here\",\n  \"googleId\": \"google_user_id_here\",\n  \"email\": \"user@example.com\",\n  \"firstName\": \"John\",\n  \"lastName\": \"Doe\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/v1/auth/google",
+          "host": ["{{base_url}}"],
+          "path": ["api", "v1", "auth", "google"]
+        }
+      },
+      "response": []
+    }
+  ]
+} 
