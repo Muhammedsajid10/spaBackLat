@@ -55,7 +55,7 @@ const employeeSchema = new mongoose.Schema({
   workSchedule: {
     type: Map,
     of: {
-      isWorking: { type: Boolean, default: false },
+      isWorking: { type: Boolean, default: true },
       startTime: { type: String, default: '00:00' },
       endTime: { type: String, default: '23:59' },
       shifts: { type: String, default: null }, // For multiple shifts: "09:00 - 13:00, 14:00 - 18:00"
