@@ -2,12 +2,21 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
+    console.log('Attempting to connect to MongoDB...');
+    console.log('MongoDB URI:', process.env.MONGODB_URI ? 'URI is set' : 'URI is not set');
+    
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
       useNewUrlParser: true,
       useUnifiedTopology: true,
+      serverSelectionTimeoutMS: 5000, // 5 second timeout
+      connectTimeoutMS: 5000, // 5 second timeout
     });
 
     console.log(`MongoDB Connected: ${conn.connection.host}`);
+    
+    // Log registered models
+    const models = mongoose.modelNames();
+    console.log('🔎 Registered Mongoose models:', models);
     
     // Handle connection events
     mongoose.connection.on('connected', () => {
@@ -22,16 +31,12 @@ const connectDB = async () => {
       console.log('Mongoose disconnected from MongoDB');
     });
 
-    // Handle application termination
-    process.on('SIGINT', async () => {
-      await mongoose.connection.close();
-      console.log('MongoDB connection closed through app termination');
-      process.exit(0);
-    });
+    return true; // Success
 
   } catch (error) {
-    console.error('Database connection failed:', error.message);
-    process.exit(1);
+    console.error('⚠️ Database connection failed:', error.message);
+    console.log('⚠️ Server will continue without database connection for testing purposes');
+    return false; // Failed but don't exit
   }
 };
 

@@ -71,7 +71,17 @@ const getAvailableProfessionals = async (req, res) => {
       const dayOfWeek = new Date(date).getDay(); // 0 = Sunday, 1 = Monday, etc.
       const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
       const dayName = dayNames[dayOfWeek];
-      const schedule = employee.workSchedule[dayName];
+      
+      // Handle both Map and Object formats for workSchedule
+      let schedule;
+      if (employee.workSchedule instanceof Map) {
+        schedule = employee.workSchedule.get(dayName);
+      } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
+        schedule = employee.workSchedule[dayName];
+      } else if (employee.legacyWorkSchedule) {
+        // Fallback to legacy schedule if available
+        schedule = employee.legacyWorkSchedule[dayName];
+      }
       
       return schedule && schedule.isWorking;
     });
@@ -149,7 +159,17 @@ const getAvailableTimeSlots = async (req, res) => {
     const dayOfWeek = new Date(date).getDay();
     const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const dayName = dayNames[dayOfWeek];
-    const schedule = employee.workSchedule[dayName];
+    
+    // Handle both Map and Object formats for workSchedule
+    let schedule;
+    if (employee.workSchedule instanceof Map) {
+      schedule = employee.workSchedule.get(dayName);
+    } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
+      schedule = employee.workSchedule[dayName];
+    } else if (employee.legacyWorkSchedule) {
+      // Fallback to legacy schedule if available
+      schedule = employee.legacyWorkSchedule[dayName];
+    }
 
     console.log('Day of week:', dayOfWeek, 'Day name:', dayName);
     console.log('Work schedule for this day:', schedule);
@@ -453,16 +473,58 @@ const createBooking = async (req, res) => {
       const year = date.getFullYear().toString().slice(-2);
       const month = (date.getMonth() + 1).toString().padStart(2, '0');
       const day = date.getDate().toString().padStart(2, '0');
-      // Find the last booking of the day
-      const lastBooking = await Booking.findOne({
-        bookingNumber: new RegExp(`^BK${year}${month}${day}`)
-      }).sort({ bookingNumber: -1 });
-      let sequence = 1;
-      if (lastBooking) {
-        const lastSequence = parseInt(lastBooking.bookingNumber.slice(-4));
-        sequence = lastSequence + 1;
+      
+      // Use timestamp to avoid race conditions
+      const timestamp = Date.now().toString().slice(-6); // Last 6 digits of timestamp
+      const randomSuffix = Math.floor(Math.random() * 99).toString().padStart(2, '0');
+      
+      // Try with timestamp-based approach first
+      let bookingNumber = `BK${year}${month}${day}${timestamp}${randomSuffix}`;
+      
+      // Check if this exact number exists (very unlikely but just in case)
+      const existingBooking = await Booking.findOne({ bookingNumber });
+      if (existingBooking) {
+        // Fallback to sequential approach with retry logic
+        let attempts = 0;
+        let sequence = 1;
+        
+        while (attempts < 10) { // Max 10 attempts to avoid infinite loop
+          try {
+            const lastBooking = await Booking.findOne({
+              bookingNumber: new RegExp(`^BK${year}${month}${day}`)
+            }).sort({ bookingNumber: -1 });
+            
+            if (lastBooking) {
+              const lastSequence = parseInt(lastBooking.bookingNumber.slice(-4));
+              if (!isNaN(lastSequence)) {
+                sequence = lastSequence + 1;
+              }
+            }
+            
+            bookingNumber = `BK${year}${month}${day}${sequence.toString().padStart(4, '0')}`;
+            
+            // Test if this number is available
+            const testBooking = await Booking.findOne({ bookingNumber });
+            if (!testBooking) {
+              break; // Found available number
+            }
+            
+            sequence++; // Try next number
+            attempts++;
+          } catch (error) {
+            console.error('Error in booking number generation attempt', attempts, error);
+            attempts++;
+          }
+        }
+        
+        if (attempts >= 10) {
+          // Ultimate fallback: use timestamp
+          bookingNumber = `BK${year}${month}${day}${Date.now().toString().slice(-4)}`;
+        }
       }
-      newBooking.bookingNumber = `BK${year}${month}${day}${sequence.toString().padStart(4, '0')}`;
+      
+      newBooking.bookingNumber = bookingNumber;
+      console.log('Generated booking number:', bookingNumber);
     }
 
     await newBooking.save();
@@ -917,7 +979,15 @@ const generateTimeSlots = (schedule, serviceDuration, date) => {
     const slotEnd = new Date(currentTime.getTime() + serviceDuration * 60 * 1000);
     
     if (slotEnd <= endTime) {
+      // Format time as "HH:MM" (24-hour format)
+      const timeString = currentTime.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      });
+      
       slots.push({
+        time: timeString,
         startTime: currentTime.toISOString(),
         endTime: slotEnd.toISOString(),
         available: true
