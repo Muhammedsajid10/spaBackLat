@@ -193,13 +193,13 @@ const getAllEmployees = catchAsync(async (req, res, next) => {
     } else {
       // Fallback to empty weekly schedule with 24-hour defaults
       employeeObj.workSchedule = {
-        sunday: { isWorking: false, startTime: '00:00', endTime: '23:59', shifts: null },
-        monday: { isWorking: false, startTime: '00:00', endTime: '23:59', shifts: null },
-        tuesday: { isWorking: false, startTime: '00:00', endTime: '23:59', shifts: null },
-        wednesday: { isWorking: false, startTime: '00:00', endTime: '23:59', shifts: null },
-        thursday: { isWorking: false, startTime: '00:00', endTime: '23:59', shifts: null },
-        friday: { isWorking: false, startTime: '00:00', endTime: '23:59', shifts: null },
-        saturday: { isWorking: false, startTime: '00:00', endTime: '23:59', shifts: null }
+        sunday: { isWorking: true, startTime: '00:00', endTime: '23:59', shifts: null },
+        monday: { isWorking: true, startTime: '00:00', endTime: '23:59', shifts: null },
+        tuesday: { isWorking: true, startTime: '00:00', endTime: '23:59', shifts: null },
+        wednesday: { isWorking: true, startTime: '00:00', endTime: '23:59', shifts: null },
+        thursday: { isWorking: true, startTime: '00:00', endTime: '23:59', shifts: null },
+        friday: { isWorking: true, startTime: '00:00', endTime: '23:59', shifts: null },
+        saturday: { isWorking: true, startTime: '00:00', endTime: '23:59', shifts: null }
       };
       console.log(`📝 Created empty schedule for ${employee.user?.firstName || employee._id}`);
     }
@@ -278,7 +278,7 @@ const convertDateScheduleToWeeklyView = (workSchedule, weekStartDate) => {
       weeklyView[dayName] = dateSchedule;
     } else {
       weeklyView[dayName] = {
-        isWorking: false,
+        isWorking: true,
         startTime: '00:00',
         endTime: '23:59',
         shifts: null
@@ -370,7 +370,7 @@ const updateEmployee = catchAsync(async (req, res, next) => {
       if (specificDate) {
         console.log(`📝 Updating schedule for ${dayName} (${specificDate}):`, schedule);
         currentWorkSchedule.set(specificDate, {
-          isWorking: schedule.isWorking || false,
+          isWorking: schedule.isWorking || true,
           startTime: schedule.startTime || null,
           endTime: schedule.endTime || null,
           shifts: schedule.shifts || null,
