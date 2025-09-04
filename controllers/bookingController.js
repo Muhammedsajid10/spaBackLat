@@ -88,20 +88,54 @@ const getAvailableProfessionals = async (req, res) => {
 
     console.log('Available employees:', availableEmployees.length);
 
-    // Transform the data to only include necessary information for clients
-    const professionals = availableEmployees.map(employee => ({
-      _id: employee._id,
-      user: {
-        firstName: employee.user.firstName,
-        lastName: employee.user.lastName
-      },
-      position: employee.position,
-      employeeId: employee.employeeId,
-      specializations: employee.specializations || [],
-      performance: {
-        ratings: employee.performance?.ratings || { average: 0, count: 0 }
+    // Transform the data to include necessary information for clients including workSchedule
+    const professionals = availableEmployees.map(employee => {
+      // Convert Map to plain object for workSchedule
+      let workScheduleObj = {};
+      if (employee.workSchedule instanceof Map) {
+        // Convert Map to plain object
+        for (let [key, value] of employee.workSchedule) {
+          workScheduleObj[key] = value;
+        }
+      } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
+        workScheduleObj = employee.workSchedule;
       }
-    }));
+
+      // Convert Map to plain object for legacyWorkSchedule
+      let legacyWorkScheduleObj = {};
+      if (employee.legacyWorkSchedule instanceof Map) {
+        for (let [key, value] of employee.legacyWorkSchedule) {
+          legacyWorkScheduleObj[key] = value;
+        }
+      } else if (employee.legacyWorkSchedule && typeof employee.legacyWorkSchedule === 'object') {
+        legacyWorkScheduleObj = employee.legacyWorkSchedule;
+      }
+
+      console.log(`[BookingController] Professional ${employee.user.firstName} workSchedule conversion:`, {
+        originalType: employee.workSchedule?.constructor?.name,
+        mapSize: employee.workSchedule instanceof Map ? employee.workSchedule.size : 'not-map',
+        convertedKeys: Object.keys(workScheduleObj),
+        sampleDay: workScheduleObj.thursday || workScheduleObj.monday || 'none'
+      });
+
+      return {
+        _id: employee._id,
+        user: {
+          firstName: employee.user.firstName,
+          lastName: employee.user.lastName
+        },
+        position: employee.position,
+        employeeId: employee.employeeId,
+        specializations: employee.specializations || [],
+        performance: {
+          ratings: employee.performance?.ratings || { average: 0, count: 0 }
+        },
+        // Include workSchedule for client-side time slot generation (converted from Map)
+        workSchedule: workScheduleObj,
+        // Also include legacy schedule as fallback (converted from Map)
+        legacyWorkSchedule: legacyWorkScheduleObj
+      };
+    });
     
     res.json({
       success: true,
@@ -160,19 +194,39 @@ const getAvailableTimeSlots = async (req, res) => {
     const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const dayName = dayNames[dayOfWeek];
     
-    // Handle both Map and Object formats for workSchedule
+    // Handle both Map and Object formats for workSchedule with DATE-SPECIFIC PRIORITY
     let schedule;
     if (employee.workSchedule instanceof Map) {
-      schedule = employee.workSchedule.get(dayName);
+      // First try to get by specific date (new format - PRIORITY)
+      const specificDateKey = date; // YYYY-MM-DD format
+      schedule = employee.workSchedule.get(specificDateKey);
+      console.log('🕒 Trying specific date key (Map):', specificDateKey, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+      
+      // If not found, try by day name (legacy format)
+      if (!schedule) {
+        schedule = employee.workSchedule.get(dayName);
+        console.log('🕒 Fallback to day key (Map):', dayName, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+      }
     } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
-      schedule = employee.workSchedule[dayName];
+      // First try specific date (new format - PRIORITY)
+      const specificDateKey = date; // YYYY-MM-DD format
+      schedule = employee.workSchedule[specificDateKey];
+      console.log('🕒 Trying specific date key (Object):', specificDateKey, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+      
+      // If not found, try day name (legacy format)
+      if (!schedule) {
+        schedule = employee.workSchedule[dayName];
+        console.log('🕒 Fallback to day key (Object):', dayName, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+      }
     } else if (employee.legacyWorkSchedule) {
       // Fallback to legacy schedule if available
       schedule = employee.legacyWorkSchedule[dayName];
+      console.log('🕒 Using legacy schedule for:', dayName);
     }
 
     console.log('Day of week:', dayOfWeek, 'Day name:', dayName);
-    console.log('Work schedule for this day:', schedule);
+    console.log('🕒 FINAL Work schedule for this day:', schedule);
+    console.log('🕒 Schedule source:', schedule === employee.workSchedule?.[date] ? 'DATE-SPECIFIC ✅' : 'DAY-BASED ❌');
 
     if (!schedule || !schedule.isWorking) {
       console.log('Employee not working on this day');
@@ -759,7 +813,36 @@ const completeBooking = async (req, res) => {
 // Get all bookings (admin only)
 const getAllBookings = async (req, res) => {
   try {
-    const bookings = await Booking.find()
+    const { startDate, endDate } = req.query;
+    
+    console.log('📅 Date filter params received:', { startDate, endDate });
+    
+    // Build the query filter
+    let dateFilter = {};
+    
+    if (startDate || endDate) {
+      // Filter by service startTime instead of appointmentDate since appointmentDate 
+      // seems to be set to noon UTC regardless of actual booking time
+      dateFilter['services.startTime'] = {};
+      
+      if (startDate) {
+        // Set start of day for startDate in UTC
+        const start = new Date(startDate + 'T00:00:00.000Z');
+        dateFilter['services.startTime'].$gte = start;
+        console.log('🔍 Filtering bookings from:', start.toISOString());
+      }
+      
+      if (endDate) {
+        // Set end of day for endDate in UTC
+        const end = new Date(endDate + 'T23:59:59.999Z');
+        dateFilter['services.startTime'].$lte = end;
+        console.log('🔍 Filtering bookings until:', end.toISOString());
+      }
+    }
+    
+    console.log('📋 Final date filter applied:', JSON.stringify(dateFilter, null, 2));
+    
+    const bookings = await Booking.find(dateFilter)
       .populate('client', 'firstName lastName email')
       .populate('services.service', 'name price')
       .populate({
@@ -770,7 +853,19 @@ const getAllBookings = async (req, res) => {
           select: 'firstName lastName'
         }
       })
-      .sort({ appointmentDate: -1 });
+      .sort({ 'services.startTime': -1 }); // Sort by actual service time instead of appointmentDate
+
+    console.log(`📊 Found ${bookings.length} bookings matching date filter`);
+    
+    // Debug: Log the date ranges of found bookings
+    if (bookings.length > 0) {
+      bookings.forEach((booking, index) => {
+        booking.services.forEach((service, serviceIndex) => {
+          const serviceDate = new Date(service.startTime);
+          console.log(`📝 Booking ${index + 1}.${serviceIndex + 1}: Service on ${serviceDate.toISOString()} (${serviceDate.toLocaleDateString()})`);
+        });
+      });
+    }
 
     res.json({
       success: true,
@@ -970,33 +1065,62 @@ const deleteBooking = async (req, res) => {
 // Generate time slots based on work schedule
 const generateTimeSlots = (schedule, serviceDuration, date) => {
   const slots = [];
-  const startTime = new Date(`${date}T${schedule.startTime}`);
-  const endTime = new Date(`${date}T${schedule.endTime}`);
-
-  let currentTime = new Date(startTime);
   
-  while (currentTime < endTime) {
-    const slotEnd = new Date(currentTime.getTime() + serviceDuration * 60 * 1000);
-    
-    if (slotEnd <= endTime) {
-      // Format time as "HH:MM" (24-hour format)
-      const timeString = currentTime.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      });
-      
-      slots.push({
-        time: timeString,
-        startTime: currentTime.toISOString(),
-        endTime: slotEnd.toISOString(),
-        available: true
-      });
-    }
-
-    currentTime = new Date(currentTime.getTime() + 30 * 60 * 1000); // 30-minute intervals
+  // Handle both shiftsData array and single startTime/endTime
+  let workingPeriods = [];
+  
+  if (schedule?.shiftsData && Array.isArray(schedule.shiftsData) && schedule.shiftsData.length > 0) {
+    // Use shiftsData array (admin format) - PRIORITY
+    workingPeriods = schedule.shiftsData.map(shift => ({
+      startTime: shift.startTime,
+      endTime: shift.endTime
+    }));
+    console.log('🕒 Using shiftsData array for time generation:', workingPeriods);
+  } else if (schedule?.startTime && schedule?.endTime && schedule?.isWorking) {
+    // Use single startTime/endTime (fallback)
+    workingPeriods = [{
+      startTime: schedule.startTime,
+      endTime: schedule.endTime
+    }];
+    console.log('🕒 Using startTime/endTime for time generation:', workingPeriods);
   }
   
+  // Generate slots for each working period
+  workingPeriods.forEach(period => {
+    const startTime = new Date(`${date}T${period.startTime}`);
+    const endTime = new Date(`${date}T${period.endTime}`);
+    
+    let currentTime = new Date(startTime);
+    
+    while (currentTime < endTime) {
+      // Use fixed 15-minute slot duration to generate all possible slots
+      // The actual service duration will be handled at booking validation time
+      const slotDuration = 15; // Fixed 15-minute slots
+      const slotEnd = new Date(currentTime.getTime() + slotDuration * 60 * 1000);
+      
+      // Generate slots as long as the slot start time is within the shift
+      if (currentTime < endTime) {
+        // Format time as "HH:MM" (24-hour format)
+        const timeString = currentTime.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+        
+        slots.push({
+          time: timeString,
+          startTime: currentTime.toISOString(),
+          endTime: slotEnd.toISOString(),
+          available: true
+        });
+      }
+
+      // ✅ CHANGED: Use 15-minute intervals instead of 30-minute
+      currentTime = new Date(currentTime.getTime() + 15 * 60 * 1000); // 15-minute intervals
+    }
+  });
+  
+  console.log('🕒 Generated', slots.length, 'time slots with 15-minute intervals');
   return slots;
 };
 

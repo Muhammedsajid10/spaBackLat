@@ -334,9 +334,10 @@ const updateEmployee = catchAsync(async (req, res, next) => {
     req.body = filteredBody;
   }
 
-  // Handle workSchedule updates with date-specific storage
+  // Handle workSchedule updates with BOTH day-based and date-specific storage
   if (req.body.workSchedule) {
     console.log('🔄 Processing workSchedule update...');
+    console.log('📝 Incoming workSchedule data:', JSON.stringify(req.body.workSchedule, null, 2));
     
     // Get current week start date from request or use current week
     const weekStartDate = req.body.weekStartDate || new Date();
@@ -364,26 +365,35 @@ const updateEmployee = catchAsync(async (req, res, next) => {
       }
     }
 
-    // Convert day-based updates to date-specific updates
+    // SAVE BOTH day-based AND date-specific updates for compatibility
     Object.entries(req.body.workSchedule).forEach(([dayName, schedule]) => {
+      console.log(`📝 Processing ${dayName} schedule:`, schedule);
+      
+      const scheduleData = {
+        isWorking: schedule.isWorking !== undefined ? schedule.isWorking : true,
+        startTime: schedule.startTime || null,
+        endTime: schedule.endTime || null,
+        shifts: schedule.shifts || null,
+        shiftsData: schedule.shiftsData || [],
+        shiftCount: schedule.shiftCount || 0
+      };
+      
+      // 1. Save with day name (for our new API compatibility)
+      currentWorkSchedule.set(dayName, scheduleData);
+      console.log(`✅ Saved day-based schedule for ${dayName}:`, scheduleData);
+      
+      // 2. Save with specific date (for legacy compatibility)
       const specificDate = getDateFromDayAndWeek(dayName, currentWeekStart);
       if (specificDate) {
-        console.log(`📝 Updating schedule for ${dayName} (${specificDate}):`, schedule);
-        currentWorkSchedule.set(specificDate, {
-          isWorking: schedule.isWorking || true,
-          startTime: schedule.startTime || null,
-          endTime: schedule.endTime || null,
-          shifts: schedule.shifts || null,
-          shiftsData: schedule.shiftsData || [],
-          shiftCount: schedule.shiftCount || 0
-        });
+        currentWorkSchedule.set(specificDate, { ...scheduleData });
+        console.log(`✅ Saved date-based schedule for ${specificDate}:`, scheduleData);
       }
     });
 
-    // Update the request body to use the date-specific schedule
+    // Update the request body to use the updated schedule
     req.body.workSchedule = currentWorkSchedule;
     
-    console.log('💾 Final workSchedule to save:', Array.from(currentWorkSchedule.entries()));
+    console.log('💾 Final workSchedule to save (first 5 entries):', Array.from(currentWorkSchedule.entries()).slice(0, 5));
   }
 
   console.log('Final request body to be saved:', JSON.stringify(req.body, null, 2));

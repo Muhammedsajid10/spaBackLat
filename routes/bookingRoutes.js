@@ -18,6 +18,9 @@ router.get('/professionals', bookingController.getAvailableProfessionals);
 // Get available time slots for a professional
 router.get('/time-slots', bookingController.getAvailableTimeSlots);
 
+// Get employee schedule and available time slots for a specific date
+router.use('/schedule', require('./publicBookingSchedule'));
+
 // Create booking confirmation (public)
 router.post('/confirmation', bookingController.createBookingConfirmation);
 
