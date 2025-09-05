@@ -821,22 +821,27 @@ const getAllBookings = async (req, res) => {
     let dateFilter = {};
     
     if (startDate || endDate) {
-      // Filter by service startTime instead of appointmentDate since appointmentDate 
-      // seems to be set to noon UTC regardless of actual booking time
-      dateFilter['services.startTime'] = {};
+      // TIMEZONE FIX: Filter by appointmentDate instead of services.startTime
+      // since appointmentDate represents the intended booking date regardless of timezone storage
+      dateFilter['appointmentDate'] = {};
       
       if (startDate) {
-        // Set start of day for startDate in UTC
-        const start = new Date(startDate + 'T00:00:00.000Z');
-        dateFilter['services.startTime'].$gte = start;
-        console.log('🔍 Filtering bookings from:', start.toISOString());
+        // TIMEZONE FIX: Expand the range to account for timezone differences
+        // Go back 24 hours to catch bookings that might be stored in different timezones
+        const startDateObj = new Date(startDate);
+        const expandedStart = new Date(startDateObj.getTime() - 24 * 60 * 60 * 1000); // 24 hours before
+        dateFilter['appointmentDate'].$gte = expandedStart;
+        console.log('🔍 Filtering bookings from (expanded):', expandedStart.toISOString());
       }
       
       if (endDate) {
-        // Set end of day for endDate in UTC
-        const end = new Date(endDate + 'T23:59:59.999Z');
-        dateFilter['services.startTime'].$lte = end;
-        console.log('🔍 Filtering bookings until:', end.toISOString());
+        // TIMEZONE FIX: Expand the range to account for timezone differences
+        // Go forward 24 hours to catch bookings that might be stored in different timezones
+        const endDateObj = new Date(endDate);
+        const expandedEnd = new Date(endDateObj.getTime() + 24 * 60 * 60 * 1000); // 24 hours after
+        expandedEnd.setHours(23, 59, 59, 999); // End of expanded day
+        dateFilter['appointmentDate'].$lte = expandedEnd;
+        console.log('🔍 Filtering bookings until (expanded):', expandedEnd.toISOString());
       }
     }
     
@@ -853,24 +858,59 @@ const getAllBookings = async (req, res) => {
           select: 'firstName lastName'
         }
       })
-      .sort({ 'services.startTime': -1 }); // Sort by actual service time instead of appointmentDate
+      .sort({ appointmentDate: -1 }); // Sort by appointmentDate instead of services.startTime
 
-    console.log(`📊 Found ${bookings.length} bookings matching date filter`);
+    console.log(`📊 Found ${bookings.length} bookings matching date filter (before client-side filtering)`);
+    
+    // TIMEZONE FIX: Apply client-side filtering to only return bookings that actually match the requested date range
+    let filteredBookings = bookings;
+    if (startDate || endDate) {
+      filteredBookings = bookings.filter(booking => {
+        // Check if any service in the booking falls within the requested date range
+        return booking.services.some(service => {
+          if (!service.startTime) return false;
+          
+          // Extract the date part from the service start time (ignoring timezone)
+          const serviceDate = new Date(service.startTime);
+          const serviceDateStr = serviceDate.getFullYear() + '-' + 
+                                  String(serviceDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                  String(serviceDate.getDate()).padStart(2, '0');
+          
+          // Also extract the local date part from appointmentDate
+          const appointmentDate = new Date(booking.appointmentDate);
+          const appointmentDateStr = appointmentDate.getFullYear() + '-' + 
+                                     String(appointmentDate.getMonth() + 1).padStart(2, '0') + '-' + 
+                                     String(appointmentDate.getDate()).padStart(2, '0');
+          
+          // Check if either the service date or appointment date matches the requested range
+          const startMatch = !startDate || serviceDateStr >= startDate || appointmentDateStr >= startDate;
+          const endMatch = !endDate || serviceDateStr <= endDate || appointmentDateStr <= endDate;
+          
+          return startMatch && endMatch;
+        });
+      });
+    }
+    
+    console.log(`📊 After client-side date filtering: ${filteredBookings.length} bookings`);
     
     // Debug: Log the date ranges of found bookings
-    if (bookings.length > 0) {
-      bookings.forEach((booking, index) => {
+    if (filteredBookings.length > 0) {
+      filteredBookings.forEach((booking, index) => {
+        const appointmentDate = new Date(booking.appointmentDate);
+        console.log(`📝 Booking ${index + 1}: Appointment date ${appointmentDate.toLocaleDateString()}`);
         booking.services.forEach((service, serviceIndex) => {
-          const serviceDate = new Date(service.startTime);
-          console.log(`📝 Booking ${index + 1}.${serviceIndex + 1}: Service on ${serviceDate.toISOString()} (${serviceDate.toLocaleDateString()})`);
+          if (service.startTime) {
+            const serviceDate = new Date(service.startTime);
+            console.log(`   Service ${serviceIndex + 1}: ${serviceDate.toLocaleDateString()} ${serviceDate.toLocaleTimeString()}`);
+          }
         });
       });
     }
 
     res.json({
       success: true,
-      results: bookings.length,
-      data: { bookings }
+      results: filteredBookings.length,
+      data: { bookings: filteredBookings }
     });
   } catch (error) {
     console.error('Error fetching all bookings:', error);
