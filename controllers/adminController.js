@@ -226,7 +226,7 @@ const getRevenueAnalytics = catchAsync(async (req, res, next) => {
 
 // Get booking analytics
 const getBookingAnalytics = catchAsync(async (req, res, next) => {
-  // Booking status distribution
+  // Booking status distribution (booking-level)
   const statusDistribution = await Booking.aggregate([
     {
       $group: {
@@ -237,13 +237,24 @@ const getBookingAnalytics = catchAsync(async (req, res, next) => {
     }
   ]);
 
-  // Calculate percentages
+  // Service-level status distribution 
+  const serviceStatusDistribution = await Booking.aggregate([
+    { $unwind: '$services' },
+    {
+      $group: {
+        _id: '$services.status',
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+
+  // Calculate percentages for booking-level statuses
   const totalBookings = statusDistribution.reduce((sum, item) => sum + item.count, 0);
   statusDistribution.forEach(item => {
     item.percentage = Math.round((item.count / totalBookings) * 100);
   });
 
-  // Booking trends (last 12 months)
+  // Booking trends (last 12 months) - now includes service-level completed count
   const twelveMonthsAgo = new Date();
   twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
 
@@ -266,6 +277,27 @@ const getBookingAnalytics = catchAsync(async (req, res, next) => {
         cancelledBookings: {
           $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] }
         }
+      }
+    },
+    { $sort: { '_id.year': 1, '_id.month': 1 } }
+  ]);
+
+  // Service-level completion trends for more accurate counting
+  const serviceCompletionTrends = await Booking.aggregate([
+    { $unwind: '$services' },
+    {
+      $match: {
+        createdAt: { $gte: twelveMonthsAgo }
+      }
+    },
+    {
+      $group: {
+        _id: {
+          year: { $year: '$createdAt' },
+          month: { $month: '$createdAt' },
+          status: '$services.status'
+        },
+        count: { $sum: 1 }
       }
     },
     { $sort: { '_id.year': 1, '_id.month': 1 } }
@@ -317,7 +349,9 @@ const getBookingAnalytics = catchAsync(async (req, res, next) => {
     success: true,
     data: {
       statusDistribution,
+      serviceStatusDistribution,
       bookingTrends,
+      serviceCompletionTrends,
       peakHours,
       popularServices
     }

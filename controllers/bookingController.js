@@ -991,8 +991,8 @@ const updateServiceStatus = async (req, res) => {
     const statusMap = {
       booked: 'scheduled',
       pending: 'scheduled',
-      confirmed: 'scheduled',
-      arrived: 'scheduled', // treat as still scheduled until start
+      confirmed: 'confirmed',  // Keep confirmed as distinct status
+      arrived: 'arrived',      // Keep arrived as distinct status  
       started: 'in-progress',
       'in-progress': 'in-progress',
       completed: 'completed',
@@ -1000,7 +1000,7 @@ const updateServiceStatus = async (req, res) => {
       'no-show': 'no-show'
     };
     const serviceStatus = statusMap[status] || status;
-    const allowed = ['scheduled','in-progress','completed','cancelled','no-show'];
+    const allowed = ['scheduled','confirmed','arrived','in-progress','completed','cancelled','no-show'];
     if (!allowed.includes(serviceStatus)) {
       return res.status(400).json({ success: false, message: 'Invalid service status' });
     }
@@ -1012,6 +1012,58 @@ const updateServiceStatus = async (req, res) => {
     if (!svc) return res.status(404).json({ success: false, message: 'Service not found in booking' });
 
     svc.status = serviceStatus;
+
+    // UPDATE OVERALL BOOKING STATUS BASED ON SERVICE STATUSES
+    const serviceCounts = {
+      scheduled: 0,
+      confirmed: 0,
+      arrived: 0,
+      'in-progress': 0,
+      completed: 0,
+      cancelled: 0,
+      'no-show': 0
+    };
+
+    // Count statuses of all services
+    booking.services.forEach(service => {
+      const status = service.status || 'scheduled';
+      if (serviceCounts.hasOwnProperty(status)) {
+        serviceCounts[status]++;
+      }
+    });
+
+    const totalServices = booking.services.length;
+    
+    // Determine overall booking status based on service statuses
+    // Map service-level statuses to valid booking-level statuses
+    if (serviceCounts.completed === totalServices) {
+      // All services completed
+      booking.status = 'completed';
+    } else if (serviceCounts['no-show'] === totalServices) {
+      // All services no-show
+      booking.status = 'no-show';
+    } else if (serviceCounts.cancelled === totalServices) {
+      // All services cancelled
+      booking.status = 'cancelled';
+    } else if (serviceCounts['in-progress'] > 0) {
+      // At least one service in progress
+      booking.status = 'started';  // Use 'started' instead of 'in-progress'
+    } else if (serviceCounts.completed > 0) {
+      // Some services completed, but not all
+      booking.status = 'started';  // Use 'started' instead of 'in-progress'
+    } else if (serviceCounts.arrived > 0) {
+      // At least one service arrived - map to booking 'arrived'
+      booking.status = 'arrived';
+    } else if (serviceCounts.confirmed > 0) {
+      // At least one service confirmed - map to booking 'confirmed'  
+      booking.status = 'confirmed';
+    } else {
+      // Default to booked if all services are scheduled
+      booking.status = 'booked';  // Use 'booked' instead of 'scheduled'
+    }
+
+    console.log(`📊 Booking ${booking._id} status updated to: ${booking.status} (based on service statuses)`);
+
     await booking.save();
 
     // If all services now no-show and booking was giftcard, auto-forfeit
