@@ -817,31 +817,25 @@ const getAllBookings = async (req, res) => {
     
     console.log('📅 Date filter params received:', { startDate, endDate });
     
-    // Build the query filter
+    // Build the query filter - TIMEZONE FIX: Use simple date comparison
     let dateFilter = {};
     
     if (startDate || endDate) {
-      // TIMEZONE FIX: Filter by appointmentDate instead of services.startTime
-      // since appointmentDate represents the intended booking date regardless of timezone storage
+      // Use appointmentDate for filtering since it represents the intended booking date
       dateFilter['appointmentDate'] = {};
       
       if (startDate) {
-        // TIMEZONE FIX: Expand the range to account for timezone differences
-        // Go back 24 hours to catch bookings that might be stored in different timezones
-        const startDateObj = new Date(startDate);
-        const expandedStart = new Date(startDateObj.getTime() - 24 * 60 * 60 * 1000); // 24 hours before
-        dateFilter['appointmentDate'].$gte = expandedStart;
-        console.log('🔍 Filtering bookings from (expanded):', expandedStart.toISOString());
+        // Parse as UTC to avoid timezone conversion
+        const startDateObj = new Date(`${startDate}T00:00:00.000Z`);
+        dateFilter['appointmentDate'].$gte = startDateObj;
+        console.log('🔍 Filtering bookings from:', startDateObj.toISOString());
       }
       
       if (endDate) {
-        // TIMEZONE FIX: Expand the range to account for timezone differences
-        // Go forward 24 hours to catch bookings that might be stored in different timezones
-        const endDateObj = new Date(endDate);
-        const expandedEnd = new Date(endDateObj.getTime() + 24 * 60 * 60 * 1000); // 24 hours after
-        expandedEnd.setHours(23, 59, 59, 999); // End of expanded day
-        dateFilter['appointmentDate'].$lte = expandedEnd;
-        console.log('🔍 Filtering bookings until (expanded):', expandedEnd.toISOString());
+        // Parse as UTC and set to end of day
+        const endDateObj = new Date(`${endDate}T23:59:59.999Z`);
+        dateFilter['appointmentDate'].$lte = endDateObj;
+        console.log('🔍 Filtering bookings until:', endDateObj.toISOString());
       }
     }
     
@@ -858,50 +852,19 @@ const getAllBookings = async (req, res) => {
           select: 'firstName lastName'
         }
       })
-      .sort({ appointmentDate: -1 }); // Sort by appointmentDate instead of services.startTime
+      .sort({ appointmentDate: -1 });
 
-    console.log(`📊 Found ${bookings.length} bookings matching date filter (before client-side filtering)`);
-    
-    // TIMEZONE FIX: Apply client-side filtering to only return bookings that actually match the requested date range
-    let filteredBookings = bookings;
-    if (startDate || endDate) {
-      filteredBookings = bookings.filter(booking => {
-        // Check if any service in the booking falls within the requested date range
-        return booking.services.some(service => {
-          if (!service.startTime) return false;
-          
-          // Extract the date part from the service start time (ignoring timezone)
-          const serviceDate = new Date(service.startTime);
-          const serviceDateStr = serviceDate.getFullYear() + '-' + 
-                                  String(serviceDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                  String(serviceDate.getDate()).padStart(2, '0');
-          
-          // Also extract the local date part from appointmentDate
-          const appointmentDate = new Date(booking.appointmentDate);
-          const appointmentDateStr = appointmentDate.getFullYear() + '-' + 
-                                     String(appointmentDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                                     String(appointmentDate.getDate()).padStart(2, '0');
-          
-          // Check if either the service date or appointment date matches the requested range
-          const startMatch = !startDate || serviceDateStr >= startDate || appointmentDateStr >= startDate;
-          const endMatch = !endDate || serviceDateStr <= endDate || appointmentDateStr <= endDate;
-          
-          return startMatch && endMatch;
-        });
-      });
-    }
-    
-    console.log(`📊 After client-side date filtering: ${filteredBookings.length} bookings`);
+    console.log(`📊 Found ${bookings.length} bookings matching date filter`);
     
     // Debug: Log the date ranges of found bookings
-    if (filteredBookings.length > 0) {
-      filteredBookings.forEach((booking, index) => {
+    if (bookings.length > 0) {
+      bookings.forEach((booking, index) => {
         const appointmentDate = new Date(booking.appointmentDate);
-        console.log(`📝 Booking ${index + 1}: Appointment date ${appointmentDate.toLocaleDateString()}`);
+        console.log(`📝 Booking ${index + 1}: Appointment date ${appointmentDate.toISOString().split('T')[0]}`);
         booking.services.forEach((service, serviceIndex) => {
           if (service.startTime) {
             const serviceDate = new Date(service.startTime);
-            console.log(`   Service ${serviceIndex + 1}: ${serviceDate.toLocaleDateString()} ${serviceDate.toLocaleTimeString()}`);
+            console.log(`   Service ${serviceIndex + 1}: ${serviceDate.toISOString()}`);
           }
         });
       });
@@ -909,8 +872,8 @@ const getAllBookings = async (req, res) => {
 
     res.json({
       success: true,
-      results: filteredBookings.length,
-      data: { bookings: filteredBookings }
+      results: bookings.length,
+      data: { bookings }
     });
   } catch (error) {
     console.error('Error fetching all bookings:', error);
@@ -1179,8 +1142,10 @@ const generateTimeSlots = (schedule, serviceDuration, date) => {
   
   // Generate slots for each working period
   workingPeriods.forEach(period => {
-    const startTime = new Date(`${date}T${period.startTime}`);
-    const endTime = new Date(`${date}T${period.endTime}`);
+    // ✅ TIMEZONE FIX: Create UTC times to match frontend expectations
+    // Frontend expects UTC times, so we create them as UTC from the start
+    const startTime = new Date(`${date}T${period.startTime}:00.000Z`);
+    const endTime = new Date(`${date}T${period.endTime}:00.000Z`);
     
     let currentTime = new Date(startTime);
     
@@ -1192,12 +1157,10 @@ const generateTimeSlots = (schedule, serviceDuration, date) => {
       
       // Generate slots as long as the slot start time is within the shift
       if (currentTime < endTime) {
-        // Format time as "HH:MM" (24-hour format)
-        const timeString = currentTime.toLocaleTimeString('en-US', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        });
+        // ✅ TIMEZONE FIX: Format time using UTC methods to ensure consistency
+        const hours = currentTime.getUTCHours().toString().padStart(2, '0');
+        const minutes = currentTime.getUTCMinutes().toString().padStart(2, '0');
+        const timeString = `${hours}:${minutes}`;
         
         slots.push({
           time: timeString,
@@ -1212,7 +1175,7 @@ const generateTimeSlots = (schedule, serviceDuration, date) => {
     }
   });
   
-  console.log('🕒 Generated', slots.length, 'time slots with 15-minute intervals');
+  console.log('🕒 Generated', slots.length, 'time slots with 15-minute intervals (UTC)');
   return slots;
 };
 
