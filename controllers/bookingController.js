@@ -71,18 +71,26 @@ const getAvailableProfessionals = async (req, res) => {
       const dayOfWeek = new Date(date).getDay(); // 0 = Sunday, 1 = Monday, etc.
       const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
       const dayName = dayNames[dayOfWeek];
-      
-      // Handle both Map and Object formats for workSchedule
+
+      // Prefer date-specific schedule (YYYY-MM-DD) then fallback to weekday-based
       let schedule;
-      if (employee.workSchedule instanceof Map) {
-        schedule = employee.workSchedule.get(dayName);
-      } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
-        schedule = employee.workSchedule[dayName];
-      } else if (employee.legacyWorkSchedule) {
-        // Fallback to legacy schedule if available
-        schedule = employee.legacyWorkSchedule[dayName];
+      try {
+        if (employee.workSchedule instanceof Map) {
+          // Try specific date key first
+          schedule = employee.workSchedule.get(date);
+          if (!schedule) schedule = employee.workSchedule.get(dayName);
+        } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
+          schedule = employee.workSchedule[date] || employee.workSchedule[dayName];
+        } else if (employee.legacyWorkSchedule) {
+          // Fallback to legacy schedule if available
+          schedule = employee.legacyWorkSchedule[date] || employee.legacyWorkSchedule[dayName] || employee.legacyWorkSchedule[dayName];
+        }
+      } catch (err) {
+        console.error('Error reading workSchedule for employee', employee._id, err);
+        schedule = null;
       }
-      
+
+      // If schedule explicitly marks isWorking false or missing, treat as not available
       return schedule && schedule.isWorking;
     });
 

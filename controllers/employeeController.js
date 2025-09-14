@@ -10,6 +10,20 @@ const catchAsync = (fn) => {
   };
 };
 
+// Small helper to format a Date to HH:MM in Asia/Kolkata for frontend display
+const formatTimeToHHMM = (dateObj) => {
+  if (!dateObj) return null;
+  try {
+    return new Date(dateObj).toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Asia/Kolkata'
+    });
+  } catch (err) {
+    return null;
+  }
+};
+
 // Helper function for API features
 class APIFeatures {
   constructor(query, queryString) {
@@ -206,6 +220,78 @@ const getAllEmployees = catchAsync(async (req, res, next) => {
     
     return employeeObj;
   });
+
+  // Optionally attach today's attendance if requested by query param `includeAttendance=true`
+  // or if a specific `date` query param is provided.
+  const includeAttendance = req.query.includeAttendance === 'true' || !!req.query.date;
+  const attendanceDateStr = req.query.date || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+  if (includeAttendance) {
+    console.log('📌 Including attendance for date:', attendanceDateStr);
+    // Build UTC date range for the day
+    const dayStart = new Date(`${attendanceDateStr}T00:00:00.000Z`);
+    const dayEnd = new Date(`${attendanceDateStr}T23:59:59.999Z`);
+
+    // Fetch attendance records for all employees for that date range
+    const attendanceRecords = await Attendance.find({
+      date: { $gte: dayStart, $lte: dayEnd }
+    });
+
+    // Map attendance by employee id for quick lookup (handle populated employee doc)
+    const attendanceByEmployee = {};
+    attendanceRecords.forEach(rec => {
+      let empId = null;
+      if (rec.employee) {
+        // rec.employee may be an ObjectId or a populated object
+        empId = rec.employee._id ? rec.employee._id.toString() : rec.employee.toString();
+      }
+      if (empId) attendanceByEmployee[empId] = rec;
+    });
+
+    // Merge attendance into employee objects
+    const employeesWithAttendance = employeesWithWeeklyView.map(emp => {
+      const empCopy = { ...emp };
+      const rec = attendanceByEmployee[empCopy._id.toString()];
+      if (rec) {
+        empCopy.clockIn = rec.clockIn && rec.clockIn.time ? formatTimeToHHMM(rec.clockIn.time) : '-';
+        empCopy.clockOut = rec.clockOut && rec.clockOut.time ? formatTimeToHHMM(rec.clockOut.time) : '-';
+        // compute total break minutes if breaks array exists
+        if (rec.breaks && Array.isArray(rec.breaks) && rec.breaks.length > 0) {
+          const totalBreakMinutes = rec.breaks.reduce((sum, b) => sum + (b.duration || 0), 0);
+          empCopy.breaks = `${totalBreakMinutes}min`;
+        } else {
+          empCopy.breaks = '-';
+        }
+        // include actual hours as a number for frontend if needed
+        empCopy.actualHours = typeof rec.actualHours === 'number' ? rec.actualHours : 0;
+        empCopy.attendanceStatus = rec.status || null;
+      } else {
+        empCopy.clockIn = '-';
+        empCopy.clockOut = '-';
+        empCopy.breaks = '-';
+        empCopy.actualHours = 0;
+        empCopy.attendanceStatus = null;
+      }
+      return empCopy;
+    });
+
+    console.log(`✅ Returning ${employeesWithAttendance.length} employees with attendance to frontend`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Employees retrieved successfully',
+      data: {
+        employees: employeesWithAttendance,
+        totalCount: employeesWithAttendance.length,
+        debug: {
+          totalInDB: allEmployees.length,
+          activeCount: activeEmployees.length,
+          inactiveCount: inactiveEmployees.length,
+          attendanceCount: attendanceRecords.length
+        }
+      }
+    });
+  }
 
   console.log(`✅ Returning ${employeesWithWeeklyView.length} employees to frontend`);
 
