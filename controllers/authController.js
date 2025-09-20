@@ -87,12 +87,15 @@ async function sendEmployeeWelcomeVerificationEmail(email, password, verificatio
         <li><b>Email:</b> ${email}</li>
         <li><b>Password:</b> ${password}</li>
       </ul>
-      <p><b>Please verify your email to activate your staff account:</b></p>
-      <a href="${verifyUrl}">${verifyUrl}</a>
+     
       <p>After verifying, you can <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login">login here</a>.</p>
       <p><i>Please change your password after your first login.</i></p>`
   };
   await transporter.sendMail(mailOptions);
+
+
+   // <p><b>Please verify your email to activate your staff account:</b></p>
+      // <a href="${verifyUrl}">${verifyUrl}</a>
 }
 
 // Register a new user
