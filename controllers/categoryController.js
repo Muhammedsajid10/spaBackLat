@@ -35,7 +35,7 @@ exports.deleteCategory = async (req, res) => {
     // Check if there are services using this category
     const servicesCount = await Service.countDocuments({ category: id });
     if (servicesCount > 0) {
-      return res.status(400).json({ 
+      return res.status(409).json({ 
         success: false, 
         message: `Cannot delete category "${category.displayName}". It has ${servicesCount} service(s) associated with it. Please reassign or delete the services first.` 
       });
