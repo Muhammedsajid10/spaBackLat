@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { promisify } = require('util');
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const { createSendToken } = require('../middleware/authMiddleware');
 const nodemailer = require('nodemailer');
@@ -708,6 +709,55 @@ const adminVerifyUserEmail = catchAsync(async (req, res, next) => {
   });
 });
 
+// Admin: Update any user's profile
+const adminUpdateUser = catchAsync(async (req, res, next) => {
+  const { userId } = req.params;
+  
+  // Validate ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid user ID format'
+    });
+  }
+
+  // Filter out unwanted fields that are not allowed to be updated
+  const allowedFields = [
+    'firstName', 'lastName', 'phone', 'email', 'dateOfBirth', 'gender', 
+    'address', 'profileImage', 'preferences'
+  ];
+  
+  const filteredBody = {};
+  Object.keys(req.body).forEach(el => {
+    if (allowedFields.includes(el)) {
+      filteredBody[el] = req.body[el];
+    }
+  });
+
+  // Check if user exists
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(404).json({
+      success: false,
+      message: 'User not found'
+    });
+  }
+
+  // Update user document
+  const updatedUser = await User.findByIdAndUpdate(userId, filteredBody, {
+    new: true,
+    runValidators: true
+  });
+
+  res.status(200).json({
+    success: true,
+    message: 'User profile updated successfully',
+    data: {
+      user: updatedUser
+    }
+  });
+});
+
 module.exports = {
   signup,
   login,
@@ -724,6 +774,7 @@ module.exports = {
   facebookAuth,
   googleAuth,
   createAdminUser,
-  adminVerifyUserEmail
+  adminVerifyUserEmail,
+  adminUpdateUser
 };
 

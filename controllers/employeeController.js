@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Employee = require('../models/Employee');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
@@ -312,6 +313,14 @@ const getAllEmployees = catchAsync(async (req, res, next) => {
 
 // Get single employee
 const getEmployee = catchAsync(async (req, res, next) => {
+  // Validate ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid employee ID format'
+    });
+  }
+
   const employee = await Employee.findById(req.params.id);
 
   if (!employee) {
@@ -382,6 +391,15 @@ const updateEmployee = catchAsync(async (req, res, next) => {
   console.log('Request body:', JSON.stringify(req.body, null, 2));
   console.log('User role:', req.user?.role);
   console.log('User ID:', req.user?._id);
+
+  // Validate ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    console.log('❌ Invalid ObjectId format:', req.params.id);
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid employee ID format'
+    });
+  }
 
   const employee = await Employee.findById(req.params.id);
 
@@ -523,6 +541,14 @@ const updateEmployee = catchAsync(async (req, res, next) => {
 
 // Delete/Deactivate employee
 const deleteEmployee = catchAsync(async (req, res, next) => {
+  // Validate ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid employee ID format'
+    });
+  }
+
   const employee = await Employee.findById(req.params.id);
 
   if (!employee) {
@@ -565,6 +591,14 @@ const deleteEmployee = catchAsync(async (req, res, next) => {
 const getEmployeeSchedule = catchAsync(async (req, res, next) => {
   const { startDate, endDate } = req.query;
   const employeeId = req.params.id;
+
+  // Validate ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid employee ID format'
+    });
+  }
 
   const employee = await Employee.findById(employeeId);
   if (!employee) {
@@ -620,6 +654,14 @@ const getEmployeeSchedule = catchAsync(async (req, res, next) => {
 const getEmployeePerformance = catchAsync(async (req, res, next) => {
   const employeeId = req.params.id;
 
+  // Validate ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid employee ID format'
+    });
+  }
+
   const employee = await Employee.findById(employeeId);
   if (!employee) {
     return res.status(404).json({
@@ -642,7 +684,7 @@ const getEmployeePerformance = catchAsync(async (req, res, next) => {
   // Get booking statistics
   const bookingStats = await Booking.aggregate([
     { $unwind: '$services' },
-    { $match: { 'services.employee': mongoose.Types.ObjectId(employeeId) } },
+    { $match: { 'services.employee': new mongoose.Types.ObjectId(employeeId) } },
     {
       $group: {
         _id: '$services.status',
@@ -657,7 +699,7 @@ const getEmployeePerformance = catchAsync(async (req, res, next) => {
     { $unwind: '$services' },
     { 
       $match: { 
-        'services.employee': mongoose.Types.ObjectId(employeeId),
+        'services.employee': new mongoose.Types.ObjectId(employeeId),
         createdAt: { $gte: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000) }
       } 
     },
@@ -678,7 +720,7 @@ const getEmployeePerformance = catchAsync(async (req, res, next) => {
   const attendanceStats = await Attendance.aggregate([
     { 
       $match: { 
-        employee: mongoose.Types.ObjectId(employeeId),
+        employee: new mongoose.Types.ObjectId(employeeId),
         date: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
       } 
     },
@@ -707,6 +749,14 @@ const getEmployeePerformance = catchAsync(async (req, res, next) => {
 const updateEmployeeAvailability = catchAsync(async (req, res, next) => {
   const employeeId = req.params.id;
   const { isAvailable, unavailableDates } = req.body;
+
+  // Validate ObjectId format
+  if (!mongoose.Types.ObjectId.isValid(employeeId)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid employee ID format'
+    });
+  }
 
   const employee = await Employee.findById(employeeId);
   if (!employee) {

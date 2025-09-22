@@ -30,6 +30,7 @@ router.post('/refresh-token', authController.refreshToken);
 
 // Admin routes
 router.post('/admin/verify-email', isAdmin, authController.adminVerifyUserEmail);
+router.patch('/admin/users/:userId', isAdmin, authController.adminUpdateUser);
 
 module.exports = router;
 
