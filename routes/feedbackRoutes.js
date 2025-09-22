@@ -1,18 +1,28 @@
 const express = require('express');
-const feedbackController = require('../controllers/feedbackController');
-const { protect } = require('../middleware/authMiddleware');
-
 const router = express.Router();
+const feedbackController = require('../controllers/feedbackController');
+const { protect, isAdmin } = require('../middleware/authMiddleware');
 
-// Apply authentication middleware to all feedback routes
-router.use(protect);
+// Create feedback (protected route)
+router.post('/create', protect, feedbackController.createFeedback);
 
-// Feedback routes
-router.post('/create', feedbackController.createFeedback);
-router.get('/my-feedback', feedbackController.getUserFeedback);
-router.get('/booking/:bookingId', feedbackController.getFeedbackByBooking);
-router.put('/:feedbackId', feedbackController.updateFeedback);
-router.delete('/:feedbackId', feedbackController.deleteFeedback);
-router.get('/:feedbackId', feedbackController.getFeedbackById);
+// Get user's feedback
+router.get('/my-feedback', protect, feedbackController.getUserFeedback);
+
+// Get feedback by booking ID
+router.get('/booking/:bookingId', protect, feedbackController.getFeedbackByBooking);
+
+// Get single feedback by ID
+router.get('/:id', protect, feedbackController.getFeedback);
+
+// Update feedback
+router.put('/:id', protect, feedbackController.updateFeedback);
+
+// Delete feedback
+router.delete('/:id', protect, feedbackController.deleteFeedback);
+
+// Admin routes
+router.get('/admin/all', protect, isAdmin, feedbackController.getAllFeedback);
+router.get('/admin/stats', protect, isAdmin, feedbackController.getFeedbackStats);
 
 module.exports = router;

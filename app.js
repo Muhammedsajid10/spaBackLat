@@ -175,6 +175,16 @@ app.use('/api/v1/payments', paymentRoutes); // Mount payment routes
 app.use('/api/v1/giftcards', giftCardRoutes); // Mount gift card routes
 app.use('/api/v1/categories', categoryRoutes);
 
+// Register feedback routes
+console.log('Registering feedback routes...');
+try {
+  const feedbackRoutes = require('./routes/feedbackRoutes');
+  app.use('/api/v1/feedback', feedbackRoutes);
+  console.log('✓ Feedback routes registered successfully');
+} catch (err) {
+  console.error('✗ Error registering feedback routes:', err.message);
+}
+
 // Debug route to inspect registered mongoose models (temporary - remove in production once issue resolved)
 app.get('/api/v1/debug/models', (req, res) => {
   try {
@@ -194,6 +204,19 @@ setTimeout(() => {
   }
 }, 1000);
 
+// List all registered routes
+app._router.stack.forEach(function(r){
+  if (r.route && r.route.path){
+    console.log('Route registered:', r.route.path)
+  } else if (r.name === 'router') {
+    r.handle.stack.forEach(function(rr){
+      if (rr.route) {
+        console.log('Nested route:', rr.route.path)
+      }
+    })
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -206,6 +229,7 @@ app.get('/health', (req, res) => {
 });
 
 // API documentation endpoint
+// API documentation endpoint
 app.get('/api', (req, res) => {
   res.status(200).json({
     success: true,
@@ -216,7 +240,8 @@ app.get('/api', (req, res) => {
       bookings: '/api/v1/bookings',
       services: '/api/v1/services',
       employees: '/api/v1/employees',
-      admin: '/api/v1/admin'
+      admin: '/api/v1/admin',
+      feedback: '/api/v1/feedback' // Add this line
     },
     endpoints: {
       health: '/health',
@@ -236,6 +261,7 @@ app.all('*', (req, res, next) => {
       services: '/api/v1/services',
       employees: '/api/v1/employees',
       admin: '/api/v1/admin',
+      feedback: '/api/v1/feedback',
       health: '/health',
       documentation: '/api'
     }

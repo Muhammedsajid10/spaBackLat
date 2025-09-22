@@ -4,260 +4,162 @@ const catchAsync = require('../utils/catchAsync');
 const AppError = require('../utils/appError');
 
 // Create feedback
-const createFeedback = catchAsync(async (req, res, next) => {
-  const userId = req.user._id;
-  const {
-    bookingId,
-    serviceId,
-    employeeId,
-    ratings,
-    comments,
-    suggestions,
-    wouldRecommend,
-    wouldReturnAsCustomer,
-    visitFrequency,
-    discoveryMethod
-  } = req.body;
+exports.createFeedback = catchAsync(async (req, res, next) => {
+  // Add user ID from the authenticated user
+  req.body.user = req.user.id;
 
-  // Validate booking exists and belongs to user
-  const booking = await Booking.findById(bookingId).populate('client');
+  // Verify that the booking exists and belongs to the user
+  const booking = await Booking.findById(req.body.booking);
   if (!booking) {
-    return res.status(404).json({
-      success: false,
-      message: 'Booking not found'
-    });
+    return next(new AppError('Booking not found', 404));
   }
 
-  if (booking.client._id.toString() !== userId.toString()) {
-    return res.status(403).json({
-      success: false,
-      message: 'You can only provide feedback for your own bookings'
-    });
+  if (booking.client.toString() !== req.user.id && req.user.role !== 'admin') {
+    return next(new AppError('You can only create feedback for your own bookings', 403));
   }
 
   // Check if feedback already exists for this booking
-  const existingFeedback = await Feedback.findOne({
-    booking: bookingId,
-    client: userId,
-    service: serviceId,
-    employee: employeeId
-  });
-
+  const existingFeedback = await Feedback.findOne({ booking: req.body.booking });
   if (existingFeedback) {
-    return res.status(400).json({
-      success: false,
-      message: 'Feedback already exists for this booking and service'
-    });
+    return next(new AppError('Feedback already exists for this booking', 400));
   }
 
-  // Create feedback
-  const feedback = await Feedback.create({
-    booking: bookingId,
-    client: userId,
-    service: serviceId,
-    employee: employeeId,
-    ratings,
-    comments,
-    suggestions,
-    wouldRecommend,
-    wouldReturnAsCustomer,
-    visitFrequency,
-    discoveryMethod,
-    submittedAt: new Date()
-  });
-
-  await feedback.populate([
-    { path: 'booking', select: 'bookingNumber appointmentDate' },
-    { path: 'service', select: 'name' },
-    { path: 'employee', populate: { path: 'user', select: 'firstName lastName' } }
-  ]);
+  const feedback = await Feedback.create(req.body);
+  await feedback.populate('booking service employee user');
 
   res.status(201).json({
     success: true,
-    message: 'Feedback submitted successfully',
-    data: {
-      feedback
-    }
+    data: feedback
   });
 });
 
 // Get user's feedback
-const getUserFeedback = catchAsync(async (req, res, next) => {
-  const userId = req.user._id;
-  const { page = 1, limit = 10 } = req.query;
-
-  const skip = (page - 1) * limit;
-
-  const feedback = await Feedback.find({ client: userId })
-    .populate([
-      { path: 'booking', select: 'bookingNumber appointmentDate' },
-      { path: 'service', select: 'name' },
-      { path: 'employee', populate: { path: 'user', select: 'firstName lastName' } }
-    ])
-    .sort({ submittedAt: -1 })
-    .skip(skip)
-    .limit(parseInt(limit));
-
-  const total = await Feedback.countDocuments({ client: userId });
+exports.getUserFeedback = catchAsync(async (req, res, next) => {
+  const feedback = await Feedback.find({ user: req.user.id })
+    .populate('booking service employee')
+    .sort('-createdAt');
 
   res.status(200).json({
     success: true,
-    data: {
-      feedback,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    }
+    results: feedback.length,
+    data: feedback
   });
 });
 
-// Get feedback by booking
-const getFeedbackByBooking = catchAsync(async (req, res, next) => {
-  const { bookingId } = req.params;
-  const userId = req.user._id;
+// Get feedback by booking ID
+exports.getFeedbackByBooking = catchAsync(async (req, res, next) => {
+  const feedback = await Feedback.findOne({ booking: req.params.bookingId })
+    .populate('booking service employee user');
 
-  // Validate booking belongs to user
-  const booking = await Booking.findById(bookingId).populate('client');
-  if (!booking) {
-    return res.status(404).json({
-      success: false,
-      message: 'Booking not found'
-    });
+  if (!feedback) {
+    return next(new AppError('Feedback not found for this booking', 404));
   }
-
-  if (booking.client._id.toString() !== userId.toString()) {
-    return res.status(403).json({
-      success: false,
-      message: 'You can only view feedback for your own bookings'
-    });
-  }
-
-  const feedback = await Feedback.find({ booking: bookingId })
-    .populate([
-      { path: 'service', select: 'name' },
-      { path: 'employee', populate: { path: 'user', select: 'firstName lastName' } }
-    ])
-    .sort({ submittedAt: -1 });
 
   res.status(200).json({
     success: true,
-    data: {
-      feedback
-    }
+    data: feedback
+  });
+});
+
+// Get single feedback
+exports.getFeedback = catchAsync(async (req, res, next) => {
+  const feedback = await Feedback.findById(req.params.id)
+    .populate('booking service employee user');
+
+  if (!feedback) {
+    return next(new AppError('Feedback not found', 404));
+  }
+
+  res.status(200).json({
+    success: true,
+    data: feedback
   });
 });
 
 // Update feedback
-const updateFeedback = catchAsync(async (req, res, next) => {
-  const { feedbackId } = req.params;
-  const userId = req.user._id;
-  const updates = req.body;
+exports.updateFeedback = catchAsync(async (req, res, next) => {
+  const feedback = await Feedback.findById(req.params.id);
 
-  const feedback = await Feedback.findById(feedbackId);
   if (!feedback) {
-    return res.status(404).json({
-      success: false,
-      message: 'Feedback not found'
-    });
+    return next(new AppError('Feedback not found', 404));
   }
 
-  if (feedback.client.toString() !== userId.toString()) {
-    return res.status(403).json({
-      success: false,
-      message: 'You can only update your own feedback'
-    });
+  // Check if user owns this feedback or is admin
+  if (feedback.user.toString() !== req.user.id && req.user.role !== 'admin') {
+    return next(new AppError('You can only update your own feedback', 403));
   }
 
-  // Update feedback
   const updatedFeedback = await Feedback.findByIdAndUpdate(
-    feedbackId,
-    { ...updates, updatedAt: new Date() },
+    req.params.id,
+    req.body,
     { new: true, runValidators: true }
-  ).populate([
-    { path: 'booking', select: 'bookingNumber appointmentDate' },
-    { path: 'service', select: 'name' },
-    { path: 'employee', populate: { path: 'user', select: 'firstName lastName' } }
-  ]);
+  ).populate('booking service employee user');
 
   res.status(200).json({
     success: true,
-    message: 'Feedback updated successfully',
-    data: {
-      feedback: updatedFeedback
-    }
+    data: updatedFeedback
   });
 });
 
 // Delete feedback
-const deleteFeedback = catchAsync(async (req, res, next) => {
-  const { feedbackId } = req.params;
-  const userId = req.user._id;
+exports.deleteFeedback = catchAsync(async (req, res, next) => {
+  const feedback = await Feedback.findById(req.params.id);
 
-  const feedback = await Feedback.findById(feedbackId);
   if (!feedback) {
-    return res.status(404).json({
-      success: false,
-      message: 'Feedback not found'
-    });
+    return next(new AppError('Feedback not found', 404));
   }
 
-  if (feedback.client.toString() !== userId.toString()) {
-    return res.status(403).json({
-      success: false,
-      message: 'You can only delete your own feedback'
-    });
+  // Check if user owns this feedback or is admin
+  if (feedback.user.toString() !== req.user.id && req.user.role !== 'admin') {
+    return next(new AppError('You can only delete your own feedback', 403));
   }
 
-  await Feedback.findByIdAndDelete(feedbackId);
+  await Feedback.findByIdAndDelete(req.params.id);
 
-  res.status(200).json({
+  res.status(204).json({
     success: true,
-    message: 'Feedback deleted successfully'
+    data: null
   });
 });
 
-// Get feedback by ID
-const getFeedbackById = catchAsync(async (req, res, next) => {
-  const { feedbackId } = req.params;
-  const userId = req.user._id;
-
-  const feedback = await Feedback.findById(feedbackId)
-    .populate([
-      { path: 'booking', select: 'bookingNumber appointmentDate' },
-      { path: 'service', select: 'name' },
-      { path: 'employee', populate: { path: 'user', select: 'firstName lastName' } }
-    ]);
-
-  if (!feedback) {
-    return res.status(404).json({
-      success: false,
-      message: 'Feedback not found'
-    });
-  }
-
-  if (feedback.client.toString() !== userId.toString()) {
-    return res.status(403).json({
-      success: false,
-      message: 'You can only view your own feedback'
-    });
-  }
+// Get all feedback (admin only)
+exports.getAllFeedback = catchAsync(async (req, res, next) => {
+  const feedback = await Feedback.find()
+    .populate('booking service employee user')
+    .sort('-createdAt');
 
   res.status(200).json({
     success: true,
-    data: {
-      feedback
+    results: feedback.length,
+    data: feedback
+  });
+});
+
+// Get feedback stats (admin only)
+exports.getFeedbackStats = catchAsync(async (req, res, next) => {
+  const stats = await Feedback.aggregate([
+    {
+      $group: {
+        _id: null,
+        avgOverallRating: { $avg: '$ratings.overall' },
+        avgServiceQuality: { $avg: '$ratings.serviceQuality' },
+        avgStaffBehavior: { $avg: '$ratings.staffBehavior' },
+        avgCleanliness: { $avg: '$ratings.cleanliness' },
+        avgAmbiance: { $avg: '$ratings.ambiance' },
+        avgValueForMoney: { $avg: '$ratings.valueForMoney' },
+        avgPunctuality: { $avg: '$ratings.punctuality' },
+        totalFeedback: { $sum: 1 },
+        recommendationRate: {
+          $avg: {
+            $cond: [{ $eq: ['$wouldRecommend', true] }, 1, 0]
+          }
+        }
+      }
     }
+  ]);
+
+  res.status(200).json({
+    success: true,
+    data: stats[0] || {}
   });
 });
-
-module.exports = {
-  createFeedback,
-  getUserFeedback,
-  getFeedbackByBooking,
-  updateFeedback,
-  deleteFeedback,
-  getFeedbackById
-};

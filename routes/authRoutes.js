@@ -1,16 +1,16 @@
 const express = require('express');
 const authController = require('../controllers/authController');
-const { protect, loginLimiter, signupLimiter, passwordResetLimiter } = require('../middleware/authMiddleware');
+const { protect} = require('../middleware/authMiddleware');
 const { isAdmin } = require('../middleware/roleMiddleware');
 
 const router = express.Router();
 
 // Public routes
-router.post('/signup', signupLimiter, authController.signup);
-router.post('/login', loginLimiter, authController.login);
-router.post('/facebook', loginLimiter, authController.facebookAuth);
-router.post('/google', loginLimiter, authController.googleAuth);
-router.post('/forgot-password', passwordResetLimiter, authController.forgotPassword);
+router.post('/signup', authController.signup);
+router.post('/login', authController.login);
+router.post('/facebook', authController.facebookAuth);
+router.post('/google', authController.googleAuth);
+router.post('/forgot-password', authController.forgotPassword);
 router.patch('/reset-password/:token', authController.resetPassword);
 router.patch('/verify-email/:token', authController.verifyEmail);
 router.post('/resend-verification', authController.resendVerificationEmail);
