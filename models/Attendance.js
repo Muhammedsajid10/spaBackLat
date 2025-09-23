@@ -152,18 +152,33 @@ attendanceSchema.index({ createdAt: -1 });
 
 // Pre-save middleware to calculate actual hours and overtime
 attendanceSchema.pre('save', function(next) {
-  if (this.clockIn.time && this.clockOut.time) {
+  if (this.clockIn && this.clockIn.time && this.clockOut && this.clockOut.time) {
     const clockInTime = new Date(this.clockIn.time);
     const clockOutTime = new Date(this.clockOut.time);
     
-    // Calculate actual hours worked
-    const diffMs = clockOutTime - clockInTime;
-    this.actualHours = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
+    // Validate the date objects before calculations
+    if (!isNaN(clockInTime.getTime()) && !isNaN(clockOutTime.getTime())) {
+      // Calculate actual hours worked
+      const diffMs = clockOutTime - clockInTime;
+      
+      // Handle negative time differences (which would be errors)
+      if (diffMs > 0) {
+        // Convert to hours with 2 decimal precision
+        this.actualHours = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
+      } else {
+        // Log an error but don't crash - this is data that needs to be fixed
+        console.error(`Invalid time difference for attendance ${this._id}: clock-out before clock-in`);
+        this.actualHours = 0;
+      }
+    } else {
+      console.error(`Invalid date objects for attendance ${this._id}`);
+      this.actualHours = 0;
+    }
     
     // Calculate if late
     if (this.scheduledShift && this.scheduledShift.startTime) {
       const scheduledStart = new Date(this.scheduledShift.startTime);
-      if (clockInTime > scheduledStart) {
+      if (!isNaN(scheduledStart.getTime()) && clockInTime > scheduledStart) {
         this.isLate = true;
         this.lateMinutes = Math.round((clockInTime - scheduledStart) / (1000 * 60));
       }
@@ -172,7 +187,7 @@ attendanceSchema.pre('save', function(next) {
     // Calculate if early leave
     if (this.scheduledShift && this.scheduledShift.endTime) {
       const scheduledEnd = new Date(this.scheduledShift.endTime);
-      if (clockOutTime < scheduledEnd) {
+      if (!isNaN(scheduledEnd.getTime()) && clockOutTime < scheduledEnd) {
         this.isEarlyLeave = true;
         this.earlyLeaveMinutes = Math.round((scheduledEnd - clockOutTime) / (1000 * 60));
       }

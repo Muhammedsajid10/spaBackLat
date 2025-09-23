@@ -185,6 +185,15 @@ try {
   console.error('✗ Error registering feedback routes:', err.message);
 }
 
+// Register password routes
+try {
+  const passwordRoutes = require('./routes/passwordRoutes');
+  app.use('/api/v1/password', passwordRoutes);
+  console.log('✓ Password routes registered successfully');
+} catch (err) {
+  console.error('✗ Error registering password routes:', err.message);
+}
+
 // Debug route to inspect registered mongoose models (temporary - remove in production once issue resolved)
 app.get('/api/v1/debug/models', (req, res) => {
   try {

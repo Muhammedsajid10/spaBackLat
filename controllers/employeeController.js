@@ -13,15 +13,25 @@ const catchAsync = (fn) => {
 
 // Small helper to format a Date to HH:MM in Asia/Kolkata for frontend display
 const formatTimeToHHMM = (dateObj) => {
-  if (!dateObj) return null;
+  if (!dateObj) return '-';
   try {
-    return new Date(dateObj).toLocaleTimeString('en-GB', {
+    // Ensure we have a valid Date object
+    const date = new Date(dateObj);
+    if (isNaN(date.getTime())) {
+      console.error('Invalid date object:', dateObj);
+      return '-';
+    }
+    
+    // Format as HH:MM using locale string to handle timezone properly
+    const timeStr = date.toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
       timeZone: 'Asia/Kolkata'
     });
+    return timeStr || '-';
   } catch (err) {
-    return null;
+    console.error('Error formatting time:', err, 'for date:', dateObj);
+    return '-';
   }
 };
 
@@ -254,22 +264,67 @@ const getAllEmployees = catchAsync(async (req, res, next) => {
       const empCopy = { ...emp };
       const rec = attendanceByEmployee[empCopy._id.toString()];
       if (rec) {
+        // Format clock in/out times properly
         empCopy.clockIn = rec.clockIn && rec.clockIn.time ? formatTimeToHHMM(rec.clockIn.time) : '-';
         empCopy.clockOut = rec.clockOut && rec.clockOut.time ? formatTimeToHHMM(rec.clockOut.time) : '-';
-        // compute total break minutes if breaks array exists
+        
+        // Compute total break minutes if breaks array exists
         if (rec.breaks && Array.isArray(rec.breaks) && rec.breaks.length > 0) {
           const totalBreakMinutes = rec.breaks.reduce((sum, b) => sum + (b.duration || 0), 0);
-          empCopy.breaks = `${totalBreakMinutes}min`;
+          empCopy.breaks = totalBreakMinutes > 0 ? `${totalBreakMinutes}min` : '-';
         } else {
           empCopy.breaks = '-';
         }
-        // include actual hours as a number for frontend if needed
+        
+        // Calculate hours worked for display
+        if (rec.clockIn && rec.clockIn.time && rec.clockOut && rec.clockOut.time) {
+          // First use the actual hours from the record if available
+          if (typeof rec.actualHours === 'number' && rec.actualHours > 0) {
+            const hours = Math.floor(rec.actualHours);
+            const minutes = Math.round((rec.actualHours - hours) * 60);
+            
+            if (minutes === 0) {
+              empCopy.hoursWorked = `${hours}h`;
+            } else {
+              empCopy.hoursWorked = `${hours}h ${minutes}min`;
+            }
+          } else {
+            // Fallback to calculating from clock times if actualHours not set
+            const clockInTime = new Date(rec.clockIn.time);
+            const clockOutTime = new Date(rec.clockOut.time);
+            
+            // Verify we have valid Date objects
+            if (!isNaN(clockInTime.getTime()) && !isNaN(clockOutTime.getTime())) {
+              const diffMs = clockOutTime - clockInTime;
+              const diffHrs = diffMs / (1000 * 60 * 60);
+              const hours = Math.floor(diffHrs);
+              const minutes = Math.round((diffHrs - hours) * 60);
+              
+              if (minutes === 0) {
+                empCopy.hoursWorked = `${hours}h`;
+              } else {
+                empCopy.hoursWorked = `${hours}h ${minutes}min`;
+              }
+            } else {
+              console.error('Invalid clock time values:', {
+                clockIn: rec.clockIn.time,
+                clockOut: rec.clockOut.time
+              });
+              empCopy.hoursWorked = '-';
+            }
+          }
+        } else {
+          empCopy.hoursWorked = '-';
+        }
+        
+        // Include actual hours as a number for frontend if needed
         empCopy.actualHours = typeof rec.actualHours === 'number' ? rec.actualHours : 0;
         empCopy.attendanceStatus = rec.status || null;
       } else {
         empCopy.clockIn = '-';
         empCopy.clockOut = '-';
         empCopy.breaks = '-';
+        empCopy.hoursWorked = '-';
         empCopy.actualHours = 0;
         empCopy.attendanceStatus = null;
       }

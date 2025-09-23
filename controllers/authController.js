@@ -198,7 +198,24 @@ const login = catchAsync(async (req, res, next) => {
   // 2) Check if user exists and password is correct
   const user = await User.findOne({ email }).select('+password');
 
-  if (!user || !(await user.correctPassword(password, user.password))) {
+  if (!user) {
+    console.log(`Login attempt: User not found for email: ${email}`);
+    return res.status(401).json({
+      success: false,
+      message: 'Incorrect email or password'
+    });
+  }
+  
+  // Additional debug information
+  console.log(`Login attempt for: ${email}`);
+  console.log(`Password provided: ${password ? '********' : 'empty'}`);
+  console.log(`User has password: ${user.password ? 'Yes' : 'No'}`);
+  
+  // Explicitly check password
+  const isPasswordCorrect = await user.correctPassword(password, user.password);
+  
+  if (!isPasswordCorrect) {
+    console.log(`Login attempt failed: Password incorrect for user: ${email}`);
     return res.status(401).json({
       success: false,
       message: 'Incorrect email or password'
