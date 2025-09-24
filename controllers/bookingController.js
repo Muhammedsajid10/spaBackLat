@@ -38,7 +38,7 @@ const getAvailableProfessionals = async (req, res) => {
   try {
     const { service, date } = req.query;
 
-    console.log('getAvailableProfessionals called with:', req.query);
+    // console.log('getAvailableProfessionals called with:', req.query);
 
     if (!service || !date) {
       return res.status(400).json({
@@ -64,7 +64,7 @@ const getAvailableProfessionals = async (req, res) => {
     .populate('user', 'firstName lastName email')
     .select('user position employeeId specializations performance workSchedule department');
 
-    console.log('Found employees:', employees.length);
+    // console.log('Found employees:', employees.length);
 
     // Filter employees based on availability for the given date
     const availableEmployees = employees.filter(employee => {
@@ -94,7 +94,7 @@ const getAvailableProfessionals = async (req, res) => {
       return schedule && schedule.isWorking;
     });
 
-    console.log('Available employees:', availableEmployees.length);
+    // console.log('Available employees:', availableEmployees.length);
 
     // Transform the data to include necessary information for clients including workSchedule
     const professionals = availableEmployees.map(employee => {
@@ -119,12 +119,7 @@ const getAvailableProfessionals = async (req, res) => {
         legacyWorkScheduleObj = employee.legacyWorkSchedule;
       }
 
-      console.log(`[BookingController] Professional ${employee.user.firstName} workSchedule conversion:`, {
-        originalType: employee.workSchedule?.constructor?.name,
-        mapSize: employee.workSchedule instanceof Map ? employee.workSchedule.size : 'not-map',
-        convertedKeys: Object.keys(workScheduleObj),
-        sampleDay: workScheduleObj.thursday || workScheduleObj.monday || 'none'
-      });
+      // console.log(`[BookingController] Professional workSchedule conversion`);
 
       return {
         _id: employee._id,
@@ -164,7 +159,7 @@ const getAvailableTimeSlots = async (req, res) => {
   try {
     const { employeeId, serviceId, date } = req.query;
 
-    console.log('getAvailableTimeSlots called with:', req.query);
+    // console.log('getAvailableTimeSlots called with:', req.query);
 
     if (!employeeId || !serviceId || !date) {
       return res.status(400).json({
@@ -184,7 +179,7 @@ const getAvailableTimeSlots = async (req, res) => {
       });
     }
 
-    console.log('Found employee:', employee.user.firstName, employee.user.lastName);
+    // console.log('Found employee:', employee.user.firstName, employee.user.lastName);
 
     // Get the service to know its duration
     const service = await Service.findById(serviceId);
@@ -195,7 +190,7 @@ const getAvailableTimeSlots = async (req, res) => {
       });
     }
 
-    console.log('Found service:', service.name, 'Duration:', service.duration);
+    // console.log('Found service:', service.name, 'Duration:', service.duration);
 
     // Get the day of week for the given date
     const dayOfWeek = new Date(date).getDay();
@@ -208,36 +203,36 @@ const getAvailableTimeSlots = async (req, res) => {
       // First try to get by specific date (new format - PRIORITY)
       const specificDateKey = date; // YYYY-MM-DD format
       schedule = employee.workSchedule.get(specificDateKey);
-      console.log('🕒 Trying specific date key (Map):', specificDateKey, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+      // console.log('🕒 Trying specific date key (Map):', specificDateKey, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
       
       // If not found, try by day name (legacy format)
       if (!schedule) {
         schedule = employee.workSchedule.get(dayName);
-        console.log('🕒 Fallback to day key (Map):', dayName, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+        // console.log('🕒 Fallback to day key (Map):', dayName, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
       }
     } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
       // First try specific date (new format - PRIORITY)
       const specificDateKey = date; // YYYY-MM-DD format
       schedule = employee.workSchedule[specificDateKey];
-      console.log('🕒 Trying specific date key (Object):', specificDateKey, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+      // console.log('🕒 Trying specific date key (Object):', specificDateKey, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
       
       // If not found, try day name (legacy format)
       if (!schedule) {
         schedule = employee.workSchedule[dayName];
-        console.log('🕒 Fallback to day key (Object):', dayName, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+        // console.log('🕒 Fallback to day key (Object):', dayName, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
       }
     } else if (employee.legacyWorkSchedule) {
       // Fallback to legacy schedule if available
       schedule = employee.legacyWorkSchedule[dayName];
-      console.log('🕒 Using legacy schedule for:', dayName);
+      // console.log('🕒 Using legacy schedule for:', dayName);
     }
 
-    console.log('Day of week:', dayOfWeek, 'Day name:', dayName);
-    console.log('🕒 FINAL Work schedule for this day:', schedule);
-    console.log('🕒 Schedule source:', schedule === employee.workSchedule?.[date] ? 'DATE-SPECIFIC ✅' : 'DAY-BASED ❌');
+    // console.log('Day of week:', dayOfWeek, 'Day name:', dayName);
+    // console.log('🕒 FINAL Work schedule for this day:', schedule);
+    // console.log('🕒 Schedule source:', schedule === employee.workSchedule?.[date] ? 'DATE-SPECIFIC ✅' : 'DAY-BASED ❌');
 
     if (!schedule || !schedule.isWorking) {
-      console.log('Employee not working on this day');
+      // console.log('Employee not working on this day');
       return res.json({
         success: true,
         results: 0,
@@ -247,7 +242,7 @@ const getAvailableTimeSlots = async (req, res) => {
 
     // Generate time slots based on work schedule
     const timeSlots = generateTimeSlots(schedule, service.duration, date);
-    console.log('Generated time slots:', timeSlots.length);
+    // console.log('Generated time slots:', timeSlots.length);
 
     // Check for existing bookings and mark slots as unavailable
     const existingBookings = await Booking.find({
@@ -256,7 +251,7 @@ const getAvailableTimeSlots = async (req, res) => {
       status: { $in: ['confirmed', 'pending'] }
     });
 
-    console.log('Existing bookings:', existingBookings.length);
+    // console.log('Existing bookings:', existingBookings.length);
 
     const availableSlots = timeSlots.map(slot => {
       const isBooked = existingBookings.some(booking => {
@@ -274,7 +269,7 @@ const getAvailableTimeSlots = async (req, res) => {
       };
     }); 
 
-    console.log('Available slots:', availableSlots.length);
+    // console.log('Available slots:', availableSlots.length);
 
     res.json({
       success: true,                              
@@ -337,7 +332,11 @@ const createBookingConfirmation = async (req, res) => {
 // Create booking (supports multiple services & professionals + gift card / membership payment)
 const createBooking = async (req, res) => {
   try {
+    console.log('🔍 FULL REQUEST BODY RECEIVED:', JSON.stringify(req.body, null, 2));
+    
   let { services: incomingServices, appointmentDate, notes, paymentMethod, client: clientData, selectionMode, paymentDetails: incomingPaymentDetails, finalAmount: incomingFinalAmount, giftCardCode } = req.body;
+
+
     if (!incomingServices || !Array.isArray(incomingServices) || incomingServices.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one service is required' });
     }
@@ -386,12 +385,7 @@ const createBooking = async (req, res) => {
     } else {
       // If no client data provided, use the current authenticated user as the client
       clientUser = req.user;
-      console.log('Using authenticated user as client:', {
-        id: clientUser._id,
-        email: clientUser.email,
-        name: `${clientUser.firstName} ${clientUser.lastName}`,
-        objectIdType: clientUser._id.constructor.name
-      });
+      // console.log('Using authenticated user as client');
     }
 
     // Ensure we have a valid client
@@ -489,7 +483,7 @@ const createBooking = async (req, res) => {
     const totalAmount = transformedServices.reduce((sum, s) => sum + s.price, 0);
     const totalDuration = transformedServices.reduce((sum, s) => sum + s.duration, 0);
 
-    console.log('Creating booking (multi-service) client:', clientUser._id, 'services:', transformedServices.length, 'mode:', selectionMode);
+    // console.log('Creating booking (multi-service) client:', clientUser._id, 'services:', transformedServices.length, 'mode:', selectionMode);
 
     const newBooking = new Booking({
       client: clientUser._id,
@@ -506,6 +500,7 @@ const createBooking = async (req, res) => {
     // Attach payment details if provided (gift card, membership, etc.)
     if (incomingPaymentDetails && typeof incomingPaymentDetails === 'object') {
       newBooking.paymentDetails = { ...incomingPaymentDetails };
+      console.log('💾 Payment details attached to booking:', newBooking.paymentDetails);
     }
     if (typeof incomingFinalAmount === 'number') {
       newBooking.finalAmount = incomingFinalAmount;
@@ -586,10 +581,127 @@ const createBooking = async (req, res) => {
       }
       
       newBooking.bookingNumber = bookingNumber;
-      console.log('Generated booking number:', bookingNumber);
+      // console.log('Generated booking number:', bookingNumber);
     }
 
     await newBooking.save();
+
+
+
+    // If membership payment: deduct session immediately
+    // Handle both admin membership discounts and direct membership payments
+    const membershipId = newBooking.paymentDetails?.membershipId || newBooking.paymentDetails?.adminMembership?.membershipId;
+    const hasAdminMembership = !!newBooking.paymentDetails?.adminMembership;
+    const hasMembershipPayment = paymentMethod === 'membership' && membershipId;
+    
+    console.log('🔍 Membership detection check:', {
+      paymentMethod,
+      membershipId,
+      hasAdminMembership,
+      hasMembershipPayment,
+      incomingPaymentDetails: incomingPaymentDetails,
+      bookingPaymentDetails: newBooking.paymentDetails,
+      shouldProcessMembership: hasMembershipPayment || hasAdminMembership
+    });
+    
+    if (hasMembershipPayment || hasAdminMembership) {
+      try {
+        const Membership = require('../models/Membership');
+        const User = require('../models/User');
+        
+        console.log('🔍 Processing membership session deduction:', {
+          membershipId: membershipId,
+          isAdminMembership: !!newBooking.paymentDetails?.adminMembership,
+          bookingClient: newBooking.client,
+          paymentDetails: newBooking.paymentDetails
+        });
+        
+        // Find the membership and verify it belongs to the client
+        const membership = await Membership.findById(membershipId).populate('client');
+        
+        if (membership) {
+          console.log('📋 Found membership:', {
+            membershipId: membership._id,
+            membershipClient: membership.client,
+            currentUsed: membership.usedSessions,
+            remaining: membership.numberOfSessions - membership.usedSessions,
+            status: membership.status
+          });
+
+          // Find the client from booking to compare
+          let bookingClient = null;
+          if (newBooking.client) {
+            // newBooking.client is an ObjectId, so query by ID directly
+            bookingClient = await User.findById(newBooking.client);
+            console.log('🔍 Booking client lookup result:', bookingClient ? {
+              id: bookingClient._id,
+              email: bookingClient.email,
+              name: `${bookingClient.firstName} ${bookingClient.lastName}`
+            } : 'not found');
+          }
+
+          // Verify membership belongs to the booking client
+          const clientMatch = bookingClient && membership.client && 
+            (membership.client._id.toString() === bookingClient._id.toString());
+
+          console.log('🔗 Client verification:', {
+            membershipClientId: membership.client?._id?.toString(),
+            bookingClientId: bookingClient?._id?.toString(),
+            membershipClientEmail: membership.client?.email,
+            bookingClientEmail: bookingClient?.email,
+            clientMatch,
+            membershipClient: membership.client ? {
+              id: membership.client._id,
+              name: `${membership.client.firstName} ${membership.client.lastName}`,
+              email: membership.client.email
+            } : null,
+            bookingClient: bookingClient ? {
+              id: bookingClient._id,
+              name: `${bookingClient.firstName} ${bookingClient.lastName}`,
+              email: bookingClient.email
+            } : null
+          });
+
+          if (clientMatch) {
+            console.log('🎯 Deducting session from verified membership - BEFORE:', {
+              usedSessions: membership.usedSessions,
+              remainingSessions: membership.numberOfSessions - membership.usedSessions,
+              status: membership.status
+            });
+            
+            // Use the membership's useSession method to properly update
+            try {
+              const updateResult = await membership.useSession();
+              console.log('💾 Membership save result:', updateResult ? 'SUCCESS' : 'FAILED');
+              
+              // Reload the membership to verify the update
+              const reloadedMembership = await Membership.findById(membership._id);
+              console.log('🔄 Reloaded membership verification:', {
+                membershipId: reloadedMembership._id,
+                usedSessions: reloadedMembership.usedSessions,
+                remainingSessions: reloadedMembership.numberOfSessions - reloadedMembership.usedSessions,
+                status: reloadedMembership.status,
+                lastUsedDate: reloadedMembership.lastUsedDate
+              });
+            } catch (sessionError) {
+              console.error('❌ Failed to deduct session:', sessionError);
+            }
+            
+            console.log('✅ Session deduction process completed');
+          } else {
+            console.warn('⚠️ Membership client mismatch - session NOT deducted:', {
+              membershipClient: membership.client?.email,
+              bookingClient: bookingClient?.email
+            });
+          }
+        } else {
+          console.warn('⚠️ Membership not found for session deduction:', membershipId);
+        }
+      } catch (membershipError) {
+        console.error('❌ Error deducting membership session:', membershipError);
+        // Don't fail the booking if membership session deduction fails
+      }
+    }
 
     // If gift card payment: redeem / deduct immediately so card cannot be re-used
     if (paymentMethod === 'giftcard') {
@@ -729,17 +841,55 @@ const cancelBooking = async (req, res) => {
     const { id } = req.params;
     const userId = req.user._id;
 
+    // Get the booking first to check payment method before cancelling
+    const bookingToCancel = await Booking.findOne({ _id: id, client: userId });
+    
+    if (!bookingToCancel) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
+      });
+    }
+
     const booking = await Booking.findOneAndUpdate(
       { _id: id, client: userId },
       { status: 'cancelled' },
       { new: true }
     );
 
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
+    // If membership payment: refund session back to membership
+    if (bookingToCancel.paymentMethod === 'membership' && bookingToCancel.paymentDetails?.membershipId) {
+      try {
+        const Membership = require('../models/Membership');
+        const membership = await Membership.findById(bookingToCancel.paymentDetails.membershipId);
+        
+        if (membership && membership.usedSessions > 0) {
+          console.log('🔄 Refunding session to membership due to cancellation:', {
+            membershipId: membership._id,
+            currentUsed: membership.usedSessions
+          });
+
+          // Refund the session
+          membership.usedSessions -= 1;
+          
+          // Update status if needed
+          if (membership.status === 'Used' && membership.usedSessions < membership.numberOfSessions) {
+            membership.status = membership.usedSessions > 0 ? 'Partially Used' : 'Active';
+          }
+          
+          await membership.save();
+          
+          console.log('✅ Session refunded successfully:', {
+            membershipId: membership._id,
+            newUsed: membership.usedSessions,
+            remaining: membership.numberOfSessions - membership.usedSessions,
+            status: membership.status
+          });
+        }
+      } catch (membershipError) {
+        console.error('❌ Error refunding membership session:', membershipError);
+        // Don't fail the cancellation if membership refund fails
+      }
     }
 
     res.json({
@@ -836,14 +986,14 @@ const getAllBookings = async (req, res) => {
         // Parse as UTC to avoid timezone conversion
         const startDateObj = new Date(`${startDate}T00:00:00.000Z`);
         dateFilter['appointmentDate'].$gte = startDateObj;
-        console.log('🔍 Filtering bookings from:', startDateObj.toISOString());
+        // console.log('🔍 Filtering bookings from:', startDateObj.toISOString());
       }
       
       if (endDate) {
         // Parse as UTC and set to end of day
         const endDateObj = new Date(`${endDate}T23:59:59.999Z`);
         dateFilter['appointmentDate'].$lte = endDateObj;
-        console.log('🔍 Filtering bookings until:', endDateObj.toISOString());
+        // console.log('🔍 Filtering bookings until:', endDateObj.toISOString());
       }
     }
     
@@ -862,13 +1012,13 @@ const getAllBookings = async (req, res) => {
       })
       .sort({ appointmentDate: -1 });
 
-    console.log(`📊 Found ${bookings.length} bookings matching date filter`);
+    // console.log(`📊 Found ${bookings.length} bookings matching date filter`);
     
     // Debug: Log the date ranges of found bookings
     if (bookings.length > 0) {
       bookings.forEach((booking, index) => {
         const appointmentDate = new Date(booking.appointmentDate);
-        console.log(`📝 Booking ${index + 1}: Appointment date ${appointmentDate.toISOString().split('T')[0]}`);
+        // console.log(`📝 Booking ${index + 1}: Appointment date ${appointmentDate.toISOString().split('T')[0]}`);
         booking.services.forEach((service, serviceIndex) => {
           if (service.startTime) {
             const serviceDate = new Date(service.startTime);
@@ -1033,7 +1183,7 @@ const updateServiceStatus = async (req, res) => {
       booking.status = 'booked';  // Use 'booked' instead of 'scheduled'
     }
 
-    console.log(`📊 Booking ${booking._id} status updated to: ${booking.status} (based on service statuses)`);
+    // console.log(`📊 Booking ${booking._id} status updated to: ${booking.status} (based on service statuses)`);
 
     await booking.save();
 

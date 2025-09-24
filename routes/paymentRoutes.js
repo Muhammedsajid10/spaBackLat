@@ -32,4 +32,7 @@ router.post('/webhook/stripe', paymentController.handleStripeWebhook);
 // Admin: get all payments
 router.get('/admin/all', isAdmin, paymentController.getAllPayments);
 
+// Admin: fix pending payment statuses
+router.post('/admin/fix-pending-status', isAdmin, paymentController.fixPendingPaymentStatus);
+
 module.exports = router; 

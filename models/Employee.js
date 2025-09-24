@@ -65,7 +65,21 @@ const employeeSchema = new mongoose.Schema({
       }],
       shiftCount: { type: Number, default: 0 }
     },
-    default: new Map()
+    default: () => {
+      // Return a new Map with default values for each day
+      const defaultMap = new Map();
+      ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].forEach(day => {
+        defaultMap.set(day, {
+          isWorking: true,
+          startTime: '00:00',
+          endTime: '23:59',
+          shifts: null,
+          shiftsData: [],
+          shiftCount: 0
+        });
+      });
+      return defaultMap;
+    }
   },
   // Keep legacy weekly template for migration purposes (temporary)
   legacyWorkSchedule: {
@@ -198,6 +212,50 @@ employeeSchema.pre(/^find/, function(next) {
     path: 'user',
     select: 'firstName lastName email phone profileImage isActive'
   });
+  next();
+});
+
+// Set default 24-hour availability schedule for new employees
+employeeSchema.pre('save', function(next) {
+  // Only run this for new documents (not updates)
+  if (!this.isNew) {
+    return next();
+  }
+
+  console.log('Employee pre-save hook: Setting default schedule if needed');
+  console.log(`Current workSchedule type: ${this.workSchedule ? (this.workSchedule.constructor ? this.workSchedule.constructor.name : typeof this.workSchedule) : 'undefined'}`);
+  
+  // Check all possible cases of empty workSchedule
+  const isEmpty = 
+    !this.workSchedule || 
+    (this.workSchedule instanceof Map && this.workSchedule.size === 0) ||
+    (this.workSchedule && typeof this.workSchedule === 'object' && 
+     !Array.isArray(this.workSchedule) && 
+     Object.keys(this.workSchedule).length === 0);
+  
+  console.log(`Is workSchedule empty? ${isEmpty ? 'Yes' : 'No'}`);
+  
+  if (isEmpty) {
+    console.log('Setting default 24-hour schedule for new employee');
+    const defaultWorkSchedule = new Map();
+    const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    
+    // Create default 24-hour schedule for each day
+    daysOfWeek.forEach(day => {
+      defaultWorkSchedule.set(day, {
+        isWorking: true,
+        startTime: '00:00',
+        endTime: '23:59',
+        shifts: null,
+        shiftsData: [],
+        shiftCount: 0
+      });
+    });
+    
+    this.workSchedule = defaultWorkSchedule;
+    console.log(`Default schedule set with ${defaultWorkSchedule.size} days`);
+  }
+  
   next();
 });
 

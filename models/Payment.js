@@ -4,7 +4,7 @@ const paymentSchema = new mongoose.Schema({
   booking: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Booking',
-    required: true
+    required: false // Allow null for membership purchases
   },
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -24,9 +24,8 @@ const paymentSchema = new mongoose.Schema({
   paymentMethod: {
     type: String,
     required: true,
-  // Note: 'giftcard' and 'membership' are accepted for bookings but typically not persisted
-  // as standalone Payment documents (no gateway). Extend enum if you plan to store them here.
-  enum: ['card', 'bank_transfer', 'digital_wallet', 'cash']
+    // Include 'membership' and 'giftcard' for membership purchases and gift card payments
+    enum: ['card', 'bank_transfer', 'digital_wallet', 'cash', 'giftcard', 'membership']
   },
   paymentGateway: {
     type: String,

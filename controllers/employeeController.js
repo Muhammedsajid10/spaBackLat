@@ -126,6 +126,40 @@ const createEmployee = catchAsync(async (req, res, next) => {
       message: 'Employee ID already exists'
     });
   }
+  
+  // If no workSchedule provided, create default 24-hour schedule for all days
+  let employeeWorkSchedule = workSchedule;
+  // console.log('Received workSchedule:', workSchedule, 'Type:', typeof workSchedule);
+  
+  // Check all possible cases of empty workSchedule
+  const isEmpty = 
+    !employeeWorkSchedule || 
+    (employeeWorkSchedule instanceof Map && employeeWorkSchedule.size === 0) ||
+    (employeeWorkSchedule && typeof employeeWorkSchedule === 'object' && 
+     !Array.isArray(employeeWorkSchedule) && 
+     Object.keys(employeeWorkSchedule).length === 0);
+  
+  // console.log('Is workSchedule empty?', isEmpty ? 'Yes' : 'No');
+  
+  if (isEmpty) {
+    // console.log('Creating default 24-hour schedule for new employee in controller');
+    const defaultWorkSchedule = new Map();
+    const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    
+    daysOfWeek.forEach(day => {
+      defaultWorkSchedule.set(day, {
+        isWorking: true,
+        startTime: '00:00',
+        endTime: '23:59',
+        shifts: null,
+        shiftsData: [],
+        shiftCount: 0
+      });
+    });
+    
+    employeeWorkSchedule = defaultWorkSchedule;
+    // console.log('Default schedule created with', defaultWorkSchedule.size, 'days');
+  }
 
   // Create employee
   const employee = await Employee.create({
@@ -136,7 +170,7 @@ const createEmployee = catchAsync(async (req, res, next) => {
     hireDate,
     salary,
     commissionRate,
-    workSchedule,
+    workSchedule: employeeWorkSchedule,
     specializations,
     certifications,
     skills,
@@ -157,26 +191,26 @@ const createEmployee = catchAsync(async (req, res, next) => {
 
 // Get all employees
 const getAllEmployees = catchAsync(async (req, res, next) => {
-  console.log('📋 Fetching all employees...');
-  console.log('Query params:', req.query);
-  console.log('Headers:', req.headers.authorization ? 'Token present' : 'No token');
+  // console.log('📋 Fetching all employees...');
+  // console.log('Query params:', req.query);
+  // console.log('Headers:', req.headers.authorization ? 'Token present' : 'No token');
   
   // Get week start date from query params or use current week
   const weekStartDate = req.query.weekStartDate ? new Date(req.query.weekStartDate) : new Date();
   const currentWeekStart = new Date(weekStartDate);
   currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay()); // Get Sunday
   
-  console.log('📅 Converting schedules for week starting:', currentWeekStart.toISOString().split('T')[0]);
+  // console.log('📅 Converting schedules for week starting:', currentWeekStart.toISOString().split('T')[0]);
 
   // First, let's check all employees regardless of isActive status
   const allEmployees = await Employee.find({});
-  console.log(`🔍 Total employees in database: ${allEmployees.length}`);
+  // console.log(`🔍 Total employees in database: ${allEmployees.length}`);
   
   const activeEmployees = await Employee.find({ isActive: true });
-  console.log(`✅ Active employees: ${activeEmployees.length}`);
+  // console.log(`✅ Active employees: ${activeEmployees.length}`);
   
   const inactiveEmployees = await Employee.find({ isActive: false });
-  console.log(`❌ Inactive employees: ${inactiveEmployees.length}`);
+  // console.log(`❌ Inactive employees: ${inactiveEmployees.length}`);
 
   // Let's see what's in the first few employees
   if (allEmployees.length > 0) {
@@ -200,17 +234,12 @@ const getAllEmployees = catchAsync(async (req, res, next) => {
   const employeesWithWeeklyView = employees.map(employee => {
     const employeeObj = employee.toObject();
     
-    console.log(`🔄 Processing employee ${employee._id}:`, {
-      hasUser: !!employee.user,
-      userName: employee.user?.firstName,
-      workScheduleType: typeof employee.workSchedule,
-      isActive: employee.isActive
-    });
+    // console.log(`🔄 Processing employee ${employee._id}`);
     
     if (employee.workSchedule && employee.workSchedule.size > 0) {
       // Convert date-specific schedule to weekly view
       employeeObj.workSchedule = convertDateScheduleToWeeklyView(employee.workSchedule, currentWeekStart);
-      console.log(`🔄 Converted schedule for ${employee.user?.firstName}:`, employeeObj.workSchedule);
+      // console.log(`🔄 Converted schedule for ${employee.user?.firstName}:`, employeeObj.workSchedule);
     } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
       // Handle old format (weekly template) - keep as is for now
       employeeObj.workSchedule = employee.workSchedule;

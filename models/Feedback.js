@@ -9,7 +9,7 @@ const feedbackSchema = new mongoose.Schema({
   client: {
     type: mongoose.Schema.ObjectId,
     ref: 'User',
-    required: [true, 'Client is required']
+    
   },
   service: {
     type: mongoose.Schema.ObjectId,

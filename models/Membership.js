@@ -22,18 +22,12 @@ const membershipSchema = new mongoose.Schema({
     required: [true, 'Service type is required'],
     default: 'Limited'
   },
-  selectedServices: [{
-    service: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Service'
-    },
-    name: String,
-    // For limited memberships
-    sessionsAllowed: {
-      type: Number,
-      default: 1
-    }
-  }],
+  service: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Service',
+    required: [true, 'Service is required']
+  },
+  serviceName: String, // Store service name for reference
   numberOfSessions: {
     type: Number,
     required: function() {
@@ -80,10 +74,10 @@ const membershipSchema = new mongoose.Schema({
     ref: 'User'
   },
   
-  // Membershipnte  Status and Dates
+  // Status and Dates
   status: { 
     type: String, 
-    enum: ['Draft', 'Active', 'Used', 'Expired', 'Cancelled'], 
+    enum: ['Draft', 'Active', 'Partially Used', 'Used', 'Expired', 'Cancelled'], 
     default: 'Draft' 
   },
   startDate: { 
@@ -98,7 +92,7 @@ const membershipSchema = new mongoose.Schema({
   },
 
   // Usage Tracking
-  sessionsUsed: {
+  usedSessions: {
     type: Number,
     default: 0
   },
@@ -106,6 +100,11 @@ const membershipSchema = new mongoose.Schema({
     type: Date
   },
 
+  // Payment Information
+  paymentIntentId: {
+    type: String,
+    sparse: true // Allow multiple null values but unique non-null values
+  },
 
   isActive: {
     type: Boolean,
@@ -113,7 +112,7 @@ const membershipSchema = new mongoose.Schema({
   },
   isTemplate: {
     type: Boolean,
-    default: true // True membership templatestin, pinne false for purchased memberships
+    default: true // True for membership templates, false for purchased memberships
   },
   
   // Metadata
@@ -136,7 +135,7 @@ membershipSchema.virtual('remainingSessions').get(function() {
   if (this.serviceType === 'Unlimited') {
     return 'Unlimited';
   }
-  return Math.max(0, this.numberOfSessions - this.sessionsUsed);
+  return Math.max(0, this.numberOfSessions - this.usedSessions);
 });
 
 // Virtual for days remaining
@@ -148,8 +147,9 @@ membershipSchema.virtual('daysRemaining').get(function() {
   return Math.max(0, diffDays);
 });
 
-// Pre-save middleware end date calculate chayyan
-membershipSchema.pre('save', function(next) {
+// Pre-save middleware for calculating end date, populating service name, and updating status
+membershipSchema.pre('save', async function(next) {
+  // Calculate end date
   if (this.isNew && this.startDate && this.validityPeriod && this.validityUnit) {
     const startDate = new Date(this.startDate);
     let endDate = new Date(startDate);
@@ -168,6 +168,36 @@ membershipSchema.pre('save', function(next) {
     
     this.endDate = endDate;
   }
+  
+  // Populate service name if we have a service ID but no service name
+  if (this.service && !this.serviceName) {
+    try {
+      const Service = mongoose.model('Service');
+      const serviceDoc = await Service.findById(this.service);
+      if (serviceDoc) {
+        this.serviceName = serviceDoc.name;
+      }
+    } catch (err) {
+      console.error('Error fetching service name:', err);
+    }
+  }
+  
+  // Update status based on usage and expiry
+  if (!this.isTemplate) {
+    const isExpired = this.isExpired();
+    const isSessionsExhausted = this.isSessionsExhausted();
+    
+    if (isExpired) {
+      this.status = 'Expired';
+    } else if (isSessionsExhausted) {
+      this.status = 'Used';
+    } else if (this.usedSessions > 0) {
+      this.status = 'Partially Used';
+    } else if (this.status !== 'Active') {
+      this.status = 'Active';
+    }
+  }
+  
   next();
 });
 
@@ -179,17 +209,18 @@ membershipSchema.methods.isExpired = function() {
 
 membershipSchema.methods.isSessionsExhausted = function() {
   if (this.serviceType === 'Unlimited') return false;
-  return this.sessionsUsed >= this.numberOfSessions;
+  return this.usedSessions >= this.numberOfSessions;
 };
 
-
 membershipSchema.methods.useSession = function() {
-  if (this.serviceType === 'Limited' && this.sessionsUsed < this.numberOfSessions) {
-    this.sessionsUsed += 1;
+  if (this.serviceType === 'Limited' && this.usedSessions < this.numberOfSessions) {
+    this.usedSessions += 1;
     this.lastUsedDate = new Date();
     
     if (this.isSessionsExhausted()) {
       this.status = 'Used';
+    } else if (this.usedSessions > 0) {
+      this.status = 'Partially Used';
     }
   }
   return this.save();

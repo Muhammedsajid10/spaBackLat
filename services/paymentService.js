@@ -192,15 +192,33 @@ class PaymentService {
 
   async createPayment(bookingId, userId, amount, currency, paymentMethod, gatewayName, extraMetadata = {}) {
     try {
-      // Validate booking
-      const booking = await Booking.findById(bookingId).populate('client', 'firstName lastName email phone');
-      if (!booking) {
-        throw new Error('Booking not found');
+      const isMembershipPurchase = !bookingId || (extraMetadata.bookingId && extraMetadata.bookingId.startsWith('membership-purchase-'));
+      let booking = null;
+      let customerInfo = {};
+
+      if (!isMembershipPurchase) {
+        // Validate booking for regular payments
+        booking = await Booking.findById(bookingId).populate('client', 'firstName lastName email phone');
+        if (!booking) {
+          throw new Error('Booking not found');
+        }
+        customerInfo = {
+          email: booking.client.email,
+          name: `${booking.client.firstName} ${booking.client.lastName}`
+        };
+      } else {
+        // For membership purchases, use admin user info or generic info
+        const User = require('../models/User');
+        const adminUser = await User.findById(userId);
+        customerInfo = {
+          email: adminUser?.email || 'admin@spa.com',
+          name: adminUser ? `${adminUser.firstName} ${adminUser.lastName}` : 'Membership Purchase'
+        };
       }
 
       // Create payment record
       const payment = new Payment({
-        booking: bookingId,
+        booking: bookingId, // Will be null for membership purchases
         user: userId,
         amount: Math.round(amount * 100), // Store in cents
         currency: currency.toUpperCase(),
@@ -218,11 +236,13 @@ class PaymentService {
         amount,
         currency,
         {
-          orderId: `ORDER_${bookingId}_${Date.now()}`,
-          customerEmail: booking.client.email,
-          customerName: `${booking.client.firstName} ${booking.client.lastName}`,
-          customerPhone: booking.client.phone,
-          description: `SPA Booking - ${booking.services[0]?.service?.name || 'Service'}`,
+          orderId: `ORDER_${bookingId || 'MEMBERSHIP'}_${Date.now()}`,
+          customerEmail: customerInfo.email,
+          customerName: customerInfo.name,
+          customerPhone: booking?.client?.phone || '',
+          description: isMembershipPurchase 
+            ? 'SPA Membership Purchase' 
+            : `SPA Booking - ${booking.services[0]?.service?.name || 'Service'}`,
           returnUrl: `${process.env.FRONTEND_URL}/payment/success?paymentId=${payment._id}`,
           cancelUrl: `${process.env.FRONTEND_URL}/payment/cancel?paymentId=${payment._id}`,
           notifyUrl: `${process.env.BACKEND_URL}/api/v1/payments/webhook/stripe`,

@@ -62,43 +62,53 @@ const createPayment = catchAsync(async (req, res, next) => {
     });
   }
 
-  // Check if booking exists and belongs to user
-  const booking = await Booking.findOne({ bookingNumber: bookingId });
-  console.log('Payment: Looking for booking with bookingNumber:', bookingId);
-  console.log('Payment: Found booking:', booking ? {
-    _id: booking._id,
-    bookingNumber: booking.bookingNumber,
-    client: booking.client,
-    clientType: typeof booking.client
-  } : 'Not found');
-  console.log('Payment: Current user:', {
-    id: userId,
-    type: typeof userId
-  });
+  // Check if this is a membership purchase (temporary booking ID)
+  const isMembershipPurchase = bookingId.startsWith('membership-purchase-');
+  let booking = null;
   
-  if (!booking) {
-    return res.status(404).json({
-      success: false,
-      message: 'Booking not found'
+  if (!isMembershipPurchase) {
+    // For regular bookings, check if booking exists and belongs to user
+    booking = await Booking.findOne({ bookingNumber: bookingId });
+    console.log('Payment: Looking for booking with bookingNumber:', bookingId);
+    console.log('Payment: Found booking:', booking ? {
+      _id: booking._id,
+      bookingNumber: booking.bookingNumber,
+      client: booking.client,
+      clientType: typeof booking.client
+    } : 'Not found');
+    console.log('Payment: Current user:', {
+      id: userId,
+      type: typeof userId
     });
+    
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
+      });
+    }
+  } else {
+    console.log('Payment: Detected membership purchase, skipping booking validation');
   }
 
-  // Temporarily bypass the client ID check for debugging
-  console.log('Payment: TEMPORARILY BYPASSING CLIENT ID CHECK FOR DEBUGGING');
-  console.log('- Booking client ID:', booking.client.toString());
-  console.log('- Payment user ID:', userId.toString());
-  
-  // TODO: Re-enable this check after debugging
-  // Client ID check temporarily disabled for debugging purposes
+  if (!isMembershipPurchase) {
+    // Temporarily bypass the client ID check for debugging
+    console.log('Payment: TEMPORARILY BYPASSING CLIENT ID CHECK FOR DEBUGGING');
+    console.log('- Booking client ID:', booking.client.toString());
+    console.log('- Payment user ID:', userId.toString());
+    
+    // TODO: Re-enable this check after debugging
+    // Client ID check temporarily disabled for debugging purposes
 
-  // Check if payment already exists for this booking
-  const existingPayment = await Payment.findOne({ booking: booking._id });
-  if (existingPayment) {
-    return res.status(400).json({
-      success: false,
-      message: 'Payment already exists for this booking',
-      paymentId: existingPayment._id
-    });
+    // Check if payment already exists for this booking
+    const existingPayment = await Payment.findOne({ booking: booking._id });
+    if (existingPayment) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment already exists for this booking',
+        paymentId: existingPayment._id
+      });
+    }
   }
 
   // Optional metadata collection (e.g., UPI)
@@ -115,13 +125,13 @@ const createPayment = catchAsync(async (req, res, next) => {
 
   // Create payment (pass metadata)
   const result = await paymentService.createPayment(
-    booking._id,  // Use booking ObjectId instead of bookingNumber
+    isMembershipPurchase ? null : booking._id,  // Use null for membership purchases
     userId,
     amount,
     currency,
     paymentMethod,
     gateway,
-    metadata
+    { ...metadata, bookingId: bookingId } // Include original bookingId in metadata
   );
 
   res.status(201).json({
@@ -448,26 +458,53 @@ const sendConfirmationEmail = catchAsync(async (req, res, next) => {
   }
 
   try {
-    // Find the booking with full details
-    const booking = await Booking.findOne({
-      $or: [
-        { _id: bookingId },
-        { bookingNumber: bookingId }
-      ]
-    })
-    .populate('client', 'firstName lastName email')
-    .populate('services.service', 'name')
-    .populate('services.employee', 'firstName lastName');
+    console.log('Attempting to find booking with ID:', bookingId);
+    
+    // Check if the ID looks like a booking number (starts with BK)
+    let booking;
+    if (typeof bookingId === 'string' && bookingId.startsWith('BK')) {
+      console.log('Looking up by booking number:', bookingId);
+      booking = await Booking.findOne({ bookingNumber: bookingId })
+        .populate('client', 'firstName lastName email')
+        .populate('services.service', 'name')
+        .populate('services.employee', 'firstName lastName');
+    } else {
+      // Try to find by ObjectId
+      try {
+        console.log('Looking up by ObjectId:', bookingId);
+        booking = await Booking.findById(bookingId)
+          .populate('client', 'firstName lastName email')
+          .populate('services.service', 'name')
+          .populate('services.employee', 'firstName lastName');
+      } catch (err) {
+        console.log('Error finding by ObjectId, will try booking number next:', err.message);
+        // If ObjectId lookup fails, try booking number as fallback
+        booking = await Booking.findOne({ bookingNumber: bookingId })
+          .populate('client', 'firstName lastName email')
+          .populate('services.service', 'name')
+          .populate('services.employee', 'firstName lastName');
+      }
+    }
 
     if (!booking) {
+      console.log('Booking not found for ID:', bookingId);
       return res.status(404).json({
         success: false,
         message: 'Booking not found'
       });
     }
 
+    console.log('Found booking:', {
+      _id: booking._id,
+      bookingNumber: booking.bookingNumber,
+      clientId: booking.client?._id
+    });
+
     // Check if booking belongs to user
     if (booking.client._id.toString() !== userId.toString()) {
+      console.log('Unauthorized: User ID does not match booking client');
+      console.log('Client ID:', booking.client._id.toString());
+      console.log('User ID:', userId.toString());
       return res.status(403).json({
         success: false,
         message: 'You can only send emails for your own bookings'
@@ -476,16 +513,20 @@ const sendConfirmationEmail = catchAsync(async (req, res, next) => {
 
     // Find the payment for this booking
     const payment = await Payment.findOne({ booking: booking._id });
+    console.log('Payment found:', payment ? 'yes' : 'no');
 
     // Send confirmation email
     const EmailService = require('../services/emailService');
     const emailService = new EmailService();
     
+    console.log('Sending confirmation email for booking:', booking.bookingNumber);
     const emailResult = await emailService.sendBookingConfirmation(booking, {
       amount: payment?.amount || booking.totalAmount,
       paymentId: payment?.transactionId || 'N/A'
     });
 
+    console.log('Email sent successfully with messageId:', emailResult.messageId);
+    
     res.status(200).json({
       success: true,
       message: 'Confirmation email sent successfully',
@@ -695,6 +736,78 @@ const getAllPayments = catchAsync(async (req, res, next) => {
   });
 });
 
+// Admin function to fix pending payment statuses
+const fixPendingPaymentStatus = catchAsync(async (req, res, next) => {
+  console.log('🔧 Admin request to fix pending payments');
+  
+  try {
+    // Find all pending payments
+    const pendingPayments = await Payment.find({ status: 'pending' })
+      .populate('booking', 'status bookingNumber')
+      .populate('user', 'firstName lastName email');
+    
+    console.log(`Found ${pendingPayments.length} pending payments`);
+    
+    let updatedCount = 0;
+    let skippedCount = 0;
+    
+    for (const payment of pendingPayments) {
+      let shouldUpdate = false;
+      let reason = '';
+      
+      // Check if booking exists and is confirmed
+      if (payment.booking && payment.booking.status === 'confirmed') {
+        shouldUpdate = true;
+        reason = 'Booking is confirmed';
+      }
+      // Check if payment has transaction ID (processed by gateway)
+      else if (payment.gatewayTransactionId || payment.paymentIntent) {
+        shouldUpdate = true;
+        reason = 'Has transaction/payment intent ID';
+      }
+      // Check if payment was created more than 1 hour ago (likely processed)
+      else if (payment.createdAt && (Date.now() - payment.createdAt.getTime()) > 3600000) {
+        shouldUpdate = true;
+        reason = 'Payment is old (likely processed)';
+      }
+      
+      if (shouldUpdate) {
+        console.log(`✅ Updating payment ${payment._id} to completed - ${reason}`);
+        payment.status = 'completed';
+        payment.processedAt = new Date();
+        await payment.save();
+        updatedCount++;
+      } else {
+        console.log(`⏸️ Skipping payment ${payment._id} - No clear completion indicators`);
+        skippedCount++;
+      }
+    }
+    
+    console.log(`🎯 Fixed ${updatedCount} payments, skipped ${skippedCount}`);
+    
+    res.status(200).json({
+      success: true,
+      message: `Successfully fixed ${updatedCount} payments`,
+      total: pendingPayments.length,
+      updated: updatedCount,
+      skipped: skippedCount,
+      details: {
+        totalPending: pendingPayments.length,
+        updatedToCompleted: updatedCount,
+        remainingPending: skippedCount
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fixing pending payments:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fix pending payments',
+      error: error.message
+    });
+  }
+});
+
 module.exports = {
   createPayment,
   confirmPayment,
@@ -709,5 +822,6 @@ module.exports = {
   paymentSuccess,
   paymentCancel,
   getCashMovementSummary,
-  getAllPayments
+  getAllPayments,
+  fixPendingPaymentStatus
 }; 

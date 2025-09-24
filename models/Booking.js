@@ -95,11 +95,19 @@ const bookingSchema = new mongoose.Schema({
     paymentDate: Date,
     refundAmount: { type: Number, default: 0 },
     refundDate: Date,
-  refundReason: String,
-  // Added fields for internal benefit tracking
-  giftCardId: { type: mongoose.Schema.Types.ObjectId, ref: 'GiftCard' },
-  redeemAmount: { type: Number, default: 0 },
-  membershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'Membership' }
+    refundReason: String,
+    // Added fields for internal benefit tracking
+    giftCardId: { type: mongoose.Schema.Types.ObjectId, ref: 'GiftCard' },
+    redeemAmount: { type: Number, default: 0 },
+    membershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'Membership' },
+    // Admin membership application (when admin applies client's membership)
+    adminMembership: {
+      membershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'Membership' },
+      discountAmount: { type: Number, default: 0 },
+      membershipName: String,
+      sessionDeduction: { type: Boolean, default: false },
+      remainingSessionsBefore: Number
+    }
   },
   status: {
     type: String,

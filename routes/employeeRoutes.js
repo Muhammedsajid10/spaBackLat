@@ -9,6 +9,7 @@ const {
   canViewOwnRatings,
   logUserAction 
 } = require('../middleware/roleMiddleware');
+const { ensureDefaultWorkSchedule } = require('../middleware/employeeMiddleware');
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ router.get('/my-performance', isEmployeeOnly, employeeController.getMyPerformanc
 // ========================================
 
 // Admin can create employee profiles
-router.post('/', isAdmin, logUserAction('create_employee'), employeeController.createEmployee);
+router.post('/', isAdmin, logUserAction('create_employee'), ensureDefaultWorkSchedule, employeeController.createEmployee);
 
 // Admin can access all employee data
 router.get('/', isAdmin, employeeController.getAllEmployees);
