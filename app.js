@@ -74,7 +74,9 @@ app.use(cors({
       'https://localhost:5175',
       'https://localhost:5176',
       'https://localhost:5177',
-      'https://tourmaline-choux-90907f.netlify.app'
+      'https://admin.alloraspadubai.com',
+      'https://user.alloraspadubai.com',
+      'https://employee.alloraspadubai.com'
     ];
     
     // Get allowed origins from environment or use defaults
