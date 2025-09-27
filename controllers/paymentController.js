@@ -540,10 +540,13 @@ const sendConfirmationEmail = catchAsync(async (req, res, next) => {
       });
     } catch (emailErr) {
       console.error('[sendConfirmationEmail] Error sending confirmation email:', emailErr);
+      // Include any sendgrid response details if present to help debugging
+      const sendgridInfo = (emailErr.message && emailErr.message.includes('| sendgrid:')) ? emailErr.message.split('| sendgrid:')[1] : undefined;
       res.status(500).json({
         success: false,
         message: 'Failed to send confirmation email',
         error: emailErr.message,
+        sendgrid: sendgridInfo,
         stack: emailErr.stack
       });
     }

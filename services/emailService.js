@@ -13,13 +13,23 @@ class EmailService {
   async sendBookingConfirmation(booking, payment) {
     try {
       console.log('Sending booking confirmation email to:', booking.client.email);
-      const emailHTML = this.generateBookingConfirmationHTML(booking, payment);
+      // Normalize payment amount: if payment.amount is stored in cents, convert to AED
+      let paymentAmountAED;
+      if (payment && typeof payment.amount === 'number') {
+        // Some parts of the app store payment.amount in cents (e.g., Stripe/Payment model)
+        // Convert to major currency units (AED)
+        paymentAmountAED = payment.amount / 100;
+      }
+      const emailHTML = this.generateBookingConfirmationHTML(booking, paymentAmountAED);
       const msg = {
         to: booking.client.email,
         from: process.env.EMAIL_FROM,
         subject: `Booking Confirmation - ${booking.bookingNumber}`,
         html: emailHTML
       };
+      if (!process.env.SENDGRID_API_KEY) {
+        throw new Error('SendGrid API key not configured (SENDGRID_API_KEY)');
+      }
       const [result] = await sgMail.send(msg);
       console.log('Email sent successfully:', result && result.headers ? result.headers['x-message-id'] : 'no message id');
       return {
@@ -27,22 +37,58 @@ class EmailService {
         messageId: result && result.headers ? result.headers['x-message-id'] : undefined
       };
     } catch (error) {
+      // If SendGrid returns a response body, log it for debugging
+      if (error && error.response && error.response.body) {
+        console.error('SendGrid response body:', JSON.stringify(error.response.body));
+      }
       console.error('Error sending booking confirmation email:', error);
-      throw new Error(`Failed to send confirmation email: ${error.message}`);
+      const extra = error && error.response && error.response.body ? ` | sendgrid:${JSON.stringify(error.response.body)}` : '';
+      throw new Error(`Failed to send confirmation email: ${error.message}${extra}`);
     }
   }
 
-  generateBookingConfirmationHTML(booking, payment) {
-    const servicesList = booking.services.map(service => `
+  generateBookingConfirmationHTML(booking, paymentAmountAED) {
+    // Helper to format numbers as currency with 2 decimals
+    const fmt = (val) => {
+      const n = Number(val) || 0;
+      return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+    };
+
+    const servicesList = booking.services.map(service => {
+      // Resolve employee display name. Booking.services.employee may be populated as:
+      // - { user: { firstName, lastName } }
+      // - { firstName, lastName } (older shape)
+      // - an ObjectId (unpopulated)
+      // - { employeeId }
+      let employeeName = '';
+      try {
+        if (service.employee && service.employee.user) {
+          const u = service.employee.user;
+          employeeName = `${u.firstName || ''}`.trim();
+          if (u.lastName) employeeName = `${employeeName} ${u.lastName}`.trim();
+        } else if (service.employee && (service.employee.firstName || service.employee.lastName)) {
+          employeeName = `${service.employee.firstName || ''}`.trim();
+          if (service.employee.lastName) employeeName = `${employeeName} ${service.employee.lastName}`.trim();
+        } else if (service.employee && service.employee.employeeId) {
+          employeeName = `Staff ${service.employee.employeeId}`;
+        }
+      } catch (e) {
+        // defensive
+        employeeName = '';
+      }
+      if (!employeeName) employeeName = 'Assigned Staff';
+
+      return `
       <tr>
         <td style="padding: 10px; border-bottom: 1px solid #eee;">
           <strong>${service.service?.name || 'Service'}</strong><br>
-          <small>Employee: ${service.employee?.firstName} ${service.employee?.lastName}</small>
+          <small>Employee: ${employeeName}</small>
         </td>
-        <td style="padding: 10px; border-bottom: 1px solid #eee;">AED ${service.price}</td>
-        <td style="padding: 10px; border-bottom: 1px solid #eee;">${service.duration} min</td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee;">AED ${fmt(service.price)}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #eee;">${service.duration || ''} min</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
     return `
     <!DOCTYPE html>
@@ -65,7 +111,7 @@ class EmailService {
     <body>
       <div class="container">
         <div class="header">
-          <h1>🎉 Booking Confirmed!</h1>
+          <h1>Booking Confirmed!</h1>
           <p>Thank you for choosing our spa services</p>
         </div>
         
@@ -75,7 +121,7 @@ class EmailService {
           <p>Your booking has been confirmed and payment has been processed successfully. We look forward to providing you with an exceptional spa experience!</p>
           
           <div class="booking-details">
-            <h3>📋 Booking Details</h3>
+            <h3>Booking Details</h3>
             <div class="detail-row">
               <span><strong>Booking Number:</strong></span>
               <span>${booking.bookingNumber}</span>
@@ -103,7 +149,7 @@ class EmailService {
           </div>
 
           <div class="booking-details">
-            <h3>💆‍♀️ Services Booked</h3>
+            <h3>Services Booked</h3>
             <table class="services-table">
               <thead>
                 <tr>
@@ -116,7 +162,7 @@ class EmailService {
                 ${servicesList}
                 <tr class="total-row">
                   <td style="padding: 15px;"><strong>Total Amount Paid</strong></td>
-                  <td style="padding: 15px;"><strong>AED ${payment?.amount || booking.totalAmount}</strong></td>
+                  <td style="padding: 15px;"><strong>AED ${fmt(paymentAmountAED !== undefined ? paymentAmountAED : booking.totalAmount)}</strong></td>
                   <td style="padding: 15px;"></td>
                 </tr>
               </tbody>
@@ -124,12 +170,12 @@ class EmailService {
           </div>
 
           <div class="next-steps">
-            <h3>📱 What's Next?</h3>
+            <h3>What's Next?</h3>
             <ul>
               <li>✅ Your appointment is confirmed</li>
-              <li>📍 Please arrive 15 minutes before your appointment time</li>
-              <li>🔄 You can modify or cancel your booking up to 24 hours before</li>
-              <li>📞 Contact us if you have any questions</li>
+              <li>Please arrive 15 minutes before your appointment time</li>
+              <li>You can modify or cancel your booking up to 24 hours before</li>
+              <li>Contact us if you have any questions</li>
             </ul>
           </div>
 
@@ -157,14 +203,21 @@ class EmailService {
         subject,
         html
       };
+      if (!process.env.SENDGRID_API_KEY) {
+        throw new Error('SendGrid API key not configured (SENDGRID_API_KEY)');
+      }
       const [result] = await sgMail.send(msg);
       return {
         success: true,
         messageId: result && result.headers ? result.headers['x-message-id'] : undefined
       };
     } catch (error) {
+      if (error && error.response && error.response.body) {
+        console.error('SendGrid response body:', JSON.stringify(error.response.body));
+      }
       console.error('Error sending email:', error);
-      throw new Error(`Failed to send email: ${error.message}`);
+      const extra = error && error.response && error.response.body ? ` | sendgrid:${JSON.stringify(error.response.body)}` : '';
+      throw new Error(`Failed to send email: ${error.message}${extra}`);
     }
   }
 
@@ -178,6 +231,9 @@ class EmailService {
         subject: 'Password Reset Request - Allora Spa',
         html: emailHTML
       };
+      if (!process.env.SENDGRID_API_KEY) {
+        throw new Error('SendGrid API key not configured (SENDGRID_API_KEY)');
+      }
       const [result] = await sgMail.send(msg);
       console.log('Password reset email sent successfully:', result && result.headers ? result.headers['x-message-id'] : 'no message id');
       return {
@@ -185,8 +241,12 @@ class EmailService {
         messageId: result && result.headers ? result.headers['x-message-id'] : undefined
       };
     } catch (error) {
+      if (error && error.response && error.response.body) {
+        console.error('SendGrid response body:', JSON.stringify(error.response.body));
+      }
       console.error('Error sending password reset email:', error);
-      throw new Error(`Failed to send password reset email: ${error.message}`);
+      const extra = error && error.response && error.response.body ? ` | sendgrid:${JSON.stringify(error.response.body)}` : '';
+      throw new Error(`Failed to send password reset email: ${error.message}${extra}`);
     }
   }
 
@@ -213,7 +273,7 @@ class EmailService {
     <body>
         <div class="container">
             <div class="header">
-                <div class="logo">🌸 Allora Spa</div>
+                <div class="logo">Allora Spa</div>
                 <h1 style="color: #e74c3c; margin: 0;">Password Reset Request</h1>
             </div>
             
