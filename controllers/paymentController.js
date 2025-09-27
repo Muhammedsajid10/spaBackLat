@@ -448,9 +448,10 @@ const confirmStripePayment = catchAsync(async (req, res, next) => {
 // Send confirmation email
 const sendConfirmationEmail = catchAsync(async (req, res, next) => {
   const { bookingId } = req.body;
-  const userId = req.user._id;
+  const userId = req.user?._id;
 
   if (!bookingId) {
+    console.error('[sendConfirmationEmail] No bookingId provided in request body');
     return res.status(400).json({
       success: false,
       message: 'Booking ID is required'
@@ -458,27 +459,23 @@ const sendConfirmationEmail = catchAsync(async (req, res, next) => {
   }
 
   try {
-    console.log('Attempting to find booking with ID:', bookingId);
-    
-    // Check if the ID looks like a booking number (starts with BK)
+    console.log('[sendConfirmationEmail] Attempting to find booking with ID:', bookingId);
     let booking;
     if (typeof bookingId === 'string' && bookingId.startsWith('BK')) {
-      console.log('Looking up by booking number:', bookingId);
+      console.log('[sendConfirmationEmail] Looking up by booking number:', bookingId);
       booking = await Booking.findOne({ bookingNumber: bookingId })
         .populate('client', 'firstName lastName email')
         .populate('services.service', 'name')
         .populate('services.employee', 'firstName lastName');
     } else {
-      // Try to find by ObjectId
       try {
-        console.log('Looking up by ObjectId:', bookingId);
+        console.log('[sendConfirmationEmail] Looking up by ObjectId:', bookingId);
         booking = await Booking.findById(bookingId)
           .populate('client', 'firstName lastName email')
           .populate('services.service', 'name')
           .populate('services.employee', 'firstName lastName');
       } catch (err) {
-        console.log('Error finding by ObjectId, will try booking number next:', err.message);
-        // If ObjectId lookup fails, try booking number as fallback
+        console.error('[sendConfirmationEmail] Error finding by ObjectId:', err.message);
         booking = await Booking.findOne({ bookingNumber: bookingId })
           .populate('client', 'firstName lastName email')
           .populate('services.service', 'name')
@@ -487,61 +484,76 @@ const sendConfirmationEmail = catchAsync(async (req, res, next) => {
     }
 
     if (!booking) {
-      console.log('Booking not found for ID:', bookingId);
+      console.error('[sendConfirmationEmail] Booking not found for ID:', bookingId);
       return res.status(404).json({
         success: false,
         message: 'Booking not found'
       });
     }
 
-    console.log('Found booking:', {
+    console.log('[sendConfirmationEmail] Found booking:', {
       _id: booking._id,
       bookingNumber: booking.bookingNumber,
-      clientId: booking.client?._id
+      clientId: booking.client?._id,
+      clientEmail: booking.client?.email
     });
 
-    // Check if booking belongs to user
+    if (!userId) {
+      console.error('[sendConfirmationEmail] No userId found in req.user');
+      return res.status(401).json({
+        success: false,
+        message: 'User not authenticated'
+      });
+    }
+
     if (booking.client._id.toString() !== userId.toString()) {
-      console.log('Unauthorized: User ID does not match booking client');
-      console.log('Client ID:', booking.client._id.toString());
-      console.log('User ID:', userId.toString());
+      console.error('[sendConfirmationEmail] Unauthorized: User ID does not match booking client', {
+        clientId: booking.client._id.toString(),
+        userId: userId.toString()
+      });
       return res.status(403).json({
         success: false,
         message: 'You can only send emails for your own bookings'
       });
     }
 
-    // Find the payment for this booking
     const payment = await Payment.findOne({ booking: booking._id });
-    console.log('Payment found:', payment ? 'yes' : 'no');
+    console.log('[sendConfirmationEmail] Payment found:', payment ? 'yes' : 'no', payment);
 
-    // Send confirmation email
     const EmailService = require('../services/emailService');
     const emailService = new EmailService();
-    
-    console.log('Sending confirmation email for booking:', booking.bookingNumber);
-    const emailResult = await emailService.sendBookingConfirmation(booking, {
-      amount: payment?.amount || booking.totalAmount,
-      paymentId: payment?.transactionId || 'N/A'
-    });
 
-    console.log('Email sent successfully with messageId:', emailResult.messageId);
-    
-    res.status(200).json({
-      success: true,
-      message: 'Confirmation email sent successfully',
-      data: {
-        messageId: emailResult.messageId,
-        email: booking.client.email
-      }
-    });
-
+    try {
+      console.log('[sendConfirmationEmail] Sending confirmation email for booking:', booking.bookingNumber);
+      const emailResult = await emailService.sendBookingConfirmation(booking, {
+        amount: payment?.amount || booking.totalAmount,
+        paymentId: payment?.transactionId || 'N/A'
+      });
+      console.log('[sendConfirmationEmail] Email sent successfully with messageId:', emailResult.messageId);
+      res.status(200).json({
+        success: true,
+        message: 'Confirmation email sent successfully',
+        data: {
+          messageId: emailResult.messageId,
+          email: booking.client.email
+        }
+      });
+    } catch (emailErr) {
+      console.error('[sendConfirmationEmail] Error sending confirmation email:', emailErr);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send confirmation email',
+        error: emailErr.message,
+        stack: emailErr.stack
+      });
+    }
   } catch (error) {
-    console.error('Error sending confirmation email:', error);
+    console.error('[sendConfirmationEmail] General error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to send confirmation email',
-      error: error.message
+      error: error.message,
+      stack: error.stack
     });
   }
 });

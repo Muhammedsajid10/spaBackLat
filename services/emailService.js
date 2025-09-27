@@ -1,37 +1,30 @@
-const nodemailer = require('nodemailer');
+
+const sgMail = require('@sendgrid/mail');
+
+// Set SendGrid API key from env
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+}
+
 
 class EmailService {
-  constructor() {
-    this.transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
-  }
+  constructor() {}
 
   async sendBookingConfirmation(booking, payment) {
     try {
       console.log('Sending booking confirmation email to:', booking.client.email);
-
       const emailHTML = this.generateBookingConfirmationHTML(booking, payment);
-
-      const mailOptions = {
-        from: process.env.EMAIL_FROM,
+      const msg = {
         to: booking.client.email,
+        from: process.env.EMAIL_FROM,
         subject: `Booking Confirmation - ${booking.bookingNumber}`,
         html: emailHTML
       };
-
-      const result = await this.transporter.sendMail(mailOptions);
-      console.log('Email sent successfully:', result.messageId);
-      
+      const [result] = await sgMail.send(msg);
+      console.log('Email sent successfully:', result && result.headers ? result.headers['x-message-id'] : 'no message id');
       return {
         success: true,
-        messageId: result.messageId
+        messageId: result && result.headers ? result.headers['x-message-id'] : undefined
       };
     } catch (error) {
       console.error('Error sending booking confirmation email:', error);
@@ -158,17 +151,16 @@ class EmailService {
 
   async sendEmail(to, subject, html) {
     try {
-      const mailOptions = {
-        from: process.env.EMAIL_FROM,
+      const msg = {
         to,
+        from: process.env.EMAIL_FROM,
         subject,
         html
       };
-
-      const result = await this.transporter.sendMail(mailOptions);
+      const [result] = await sgMail.send(msg);
       return {
         success: true,
-        messageId: result.messageId
+        messageId: result && result.headers ? result.headers['x-message-id'] : undefined
       };
     } catch (error) {
       console.error('Error sending email:', error);
@@ -179,22 +171,18 @@ class EmailService {
   async sendPasswordResetEmail(email, resetURL, firstName = '') {
     try {
       console.log('Sending password reset email to:', email);
-
       const emailHTML = this.generatePasswordResetHTML(email, resetURL, firstName);
-
-      const mailOptions = {
-        from: process.env.EMAIL_FROM,
+      const msg = {
         to: email,
+        from: process.env.EMAIL_FROM,
         subject: 'Password Reset Request - Allora Spa',
         html: emailHTML
       };
-
-      const result = await this.transporter.sendMail(mailOptions);
-      console.log('Password reset email sent successfully:', result.messageId);
-      
+      const [result] = await sgMail.send(msg);
+      console.log('Password reset email sent successfully:', result && result.headers ? result.headers['x-message-id'] : 'no message id');
       return {
         success: true,
-        messageId: result.messageId
+        messageId: result && result.headers ? result.headers['x-message-id'] : undefined
       };
     } catch (error) {
       console.error('Error sending password reset email:', error);
