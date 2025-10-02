@@ -27,10 +27,10 @@ const bookingRoutes = require('./routes/bookingRoutes');
 const serviceRoutes = require('./routes/serviceRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const feedbackRoutes = require('./routes/feedbackRoutes');
 const membershipRoutes = require('./routes/membershipRoutes'); // Membership routes
 const paymentRoutes = require('./routes/paymentRoutes'); // Payment routes
 const giftCardRoutes = require('./routes/giftCardRoutes'); // Gift card routes
-const categoryRoutes = require('./routes/categoryRoutes');
 
 // Import middleware
 const { isLoggedIn } = require('./middleware/authMiddleware');
@@ -74,9 +74,7 @@ app.use(cors({
       'https://localhost:5175',
       'https://localhost:5176',
       'https://localhost:5177',
-      'https://admin.alloraspadubai.com',
-      'https://user.alloraspadubai.com',
-      'https://employee.alloraspadubai.com'
+      'https://tourmaline-choux-90907f.netlify.app'
     ];
     
     // Get allowed origins from environment or use defaults
@@ -171,30 +169,11 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/bookings', bookingRoutes);
 app.use('/api/v1/services', serviceRoutes);
 app.use('/api/v1/employees', employeeRoutes);
+app.use('/api/v1/feedbacks', feedbackRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/memberships', membershipRoutes); // Add this line
 app.use('/api/v1/payments', paymentRoutes); // Mount payment routes
 app.use('/api/v1/giftcards', giftCardRoutes); // Mount gift card routes
-app.use('/api/v1/categories', categoryRoutes);
-
-// Register feedback routes
-console.log('Registering feedback routes...');
-try {
-  const feedbackRoutes = require('./routes/feedbackRoutes');
-  app.use('/api/v1/feedback', feedbackRoutes);
-  console.log('✓ Feedback routes registered successfully');
-} catch (err) {
-  console.error('✗ Error registering feedback routes:', err.message);
-}
-
-// Register password routes
-try {
-  const passwordRoutes = require('./routes/passwordRoutes');
-  app.use('/api/v1/password', passwordRoutes);
-  console.log('✓ Password routes registered successfully');
-} catch (err) {
-  console.error('✗ Error registering password routes:', err.message);
-}
 
 // Debug route to inspect registered mongoose models (temporary - remove in production once issue resolved)
 app.get('/api/v1/debug/models', (req, res) => {
@@ -215,19 +194,6 @@ setTimeout(() => {
   }
 }, 1000);
 
-// List all registered routes
-app._router.stack.forEach(function(r){
-  if (r.route && r.route.path){
-    console.log('Route registered:', r.route.path)
-  } else if (r.name === 'router') {
-    r.handle.stack.forEach(function(rr){
-      if (rr.route) {
-        console.log('Nested route:', rr.route.path)
-      }
-    })
-  }
-});
-
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -240,7 +206,6 @@ app.get('/health', (req, res) => {
 });
 
 // API documentation endpoint
-// API documentation endpoint
 app.get('/api', (req, res) => {
   res.status(200).json({
     success: true,
@@ -251,8 +216,7 @@ app.get('/api', (req, res) => {
       bookings: '/api/v1/bookings',
       services: '/api/v1/services',
       employees: '/api/v1/employees',
-      admin: '/api/v1/admin',
-      feedback: '/api/v1/feedback' // Add this line
+      admin: '/api/v1/admin'
     },
     endpoints: {
       health: '/health',
@@ -272,7 +236,6 @@ app.all('*', (req, res, next) => {
       services: '/api/v1/services',
       employees: '/api/v1/employees',
       admin: '/api/v1/admin',
-      feedback: '/api/v1/feedback',
       health: '/health',
       documentation: '/api'
     }
