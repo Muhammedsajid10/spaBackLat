@@ -9,6 +9,7 @@ router.use(protect);
 
 // Feedback routes
 router.post('/create', feedbackController.createFeedback);
+router.post('/create-batch', feedbackController.createFeedbackBatch);
 router.get('/my-feedback', feedbackController.getUserFeedback);
 router.get('/booking/:bookingId', feedbackController.getFeedbackByBooking);
 router.put('/:feedbackId', feedbackController.updateFeedback);
