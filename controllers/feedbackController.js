@@ -6,17 +6,17 @@ const AppError = require('../utils/appError');
 // Create feedback
 const createFeedback = catchAsync(async (req, res, next) => {
   const userId = req.user._id;
+  // If client provided multiple items, delegate to batch handler so the same
+  // route can be used for single or multiple service feedback submissions.
+  if (Array.isArray(req.body.items)) {
+    return createFeedbackBatch(req, res, next);
+  }
   const {
     bookingId,
     serviceId,
     employeeId,
-    ratings,
-    comments,
-    suggestions,
-    wouldRecommend,
-    wouldReturnAsCustomer,
-    visitFrequency,
-    discoveryMethod
+    rating, // overall rating number (1-5)
+    comment
   } = req.body;
 
   // Validate booking exists and belongs to user
@@ -50,19 +50,14 @@ const createFeedback = catchAsync(async (req, res, next) => {
     });
   }
 
-  // Create feedback
+  // Create simplified feedback record
   const feedback = await Feedback.create({
     booking: bookingId,
     client: userId,
     service: serviceId,
     employee: employeeId,
-    ratings,
-    comments,
-    suggestions,
-    wouldRecommend,
-    wouldReturnAsCustomer,
-    visitFrequency,
-    discoveryMethod,
+    ratings: { overall: Number(rating) || 0 },
+    comment: comment || '',
     submittedAt: new Date()
   });
 
@@ -78,6 +73,117 @@ const createFeedback = catchAsync(async (req, res, next) => {
     data: {
       feedback
     }
+  });
+});
+
+// Create multiple feedback entries for services within a single booking
+const createFeedbackBatch = catchAsync(async (req, res, next) => {
+  const userId = req.user._id;
+  const { bookingId: topBookingId, items } = req.body; // items: [{ bookingId?, serviceId, employeeId, rating, comment }]
+  const topLevelComment = req.body.comment;
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ success: false, message: 'No feedback items provided' });
+  }
+
+  // Collect bookingIds to validate. If a top-level bookingId is provided, prefer it.
+  const bookingIds = new Set();
+  if (topBookingId) bookingIds.add(topBookingId.toString());
+  for (const it of items) {
+    if (it.bookingId) bookingIds.add(it.bookingId.toString());
+  }
+
+  // Fetch bookings for validation (only those provided)
+  const bookingIdArray = Array.from(bookingIds);
+  const bookings = bookingIdArray.length > 0
+    ? await Booking.find({ _id: { $in: bookingIdArray } }).populate('client')
+    : [];
+
+  const bookingsMap = {};
+  for (const b of bookings) bookingsMap[b._id.toString()] = b;
+
+  const results = [];
+
+  for (const item of items) {
+  const bid = (topBookingId && !item.bookingId) ? topBookingId : item.bookingId || topBookingId;
+  const { serviceId, employeeId, rating } = item;
+  // Prefer per-item comment, otherwise use top-level comment if provided
+  const itemComment = (item.comment !== undefined && item.comment !== null) ? item.comment : (topLevelComment || '');
+
+    // Validate booking presence for this item
+    if (!bid) {
+      results.push({ item, success: false, message: 'bookingId missing for item' });
+      continue;
+    }
+
+    const booking = bookingsMap[bid.toString()];
+    if (!booking) {
+      results.push({ item, success: false, message: 'Booking not found' });
+      continue;
+    }
+
+    // Validate booking ownership
+    if (booking.client._id.toString() !== userId.toString()) {
+      results.push({ item, success: false, message: 'You can only provide feedback for your own bookings' });
+      continue;
+    }
+
+    // Basic per-item validation before attempting DB create
+    if (!serviceId) {
+      results.push({ item, success: false, message: 'Service is required' });
+      continue;
+    }
+
+    if (!employeeId) {
+      results.push({ item, success: false, message: 'Employee is required' });
+      continue;
+    }
+
+    const numericRating = Number(rating);
+    if (!Number.isFinite(numericRating) || numericRating < 1 || numericRating > 5) {
+      results.push({ item, success: false, message: 'Invalid input data. Rating must be between 1 and 5' });
+      continue;
+    }
+
+    try {
+      // Skip if duplicate exists (unique index protects, but check to return friendly message)
+      const existing = await Feedback.findOne({ booking: bid, service: serviceId, employee: employeeId, client: userId });
+      if (existing) {
+        results.push({ item, success: false, message: 'Feedback already exists for this booking/service/employee' });
+        continue;
+      }
+
+      const fb = await Feedback.create({
+        booking: bid,
+        client: userId,
+        service: serviceId,
+        employee: employeeId,
+        ratings: { overall: numericRating },
+        comment: itemComment || '',
+        submittedAt: new Date()
+      });
+
+      await fb.populate([
+        { path: 'booking', select: 'bookingNumber appointmentDate' },
+        { path: 'service', select: 'name' },
+        { path: 'employee', populate: { path: 'user', select: 'firstName lastName' } }
+      ]);
+
+      results.push({ item, success: true, feedback: fb });
+    } catch (err) {
+      // In case of unique index race or validation error, return failure for that item
+      results.push({ item, success: false, message: err.message });
+    }
+  }
+
+  // Summary
+  const created = results.filter(r => r.success).length;
+  const failed = results.length - created;
+
+  res.status(207).json({ // 207 Multi-Status: per-item results
+    success: failed === 0,
+    summary: { total: results.length, created, failed },
+    results
   });
 });
 
@@ -255,6 +361,7 @@ const getFeedbackById = catchAsync(async (req, res, next) => {
 
 module.exports = {
   createFeedback,
+  createFeedbackBatch,
   getUserFeedback,
   getFeedbackByBooking,
   updateFeedback,
