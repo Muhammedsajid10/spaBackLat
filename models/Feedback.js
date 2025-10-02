@@ -9,7 +9,7 @@ const feedbackSchema = new mongoose.Schema({
   client: {
     type: mongoose.Schema.ObjectId,
     ref: 'User',
-    
+    required: [true, 'Client is required']
   },
   service: {
     type: mongoose.Schema.ObjectId,
@@ -27,36 +27,6 @@ const feedbackSchema = new mongoose.Schema({
       required: [true, 'Overall rating is required'],
       min: [1, 'Rating must be at least 1'],
       max: [5, 'Rating cannot exceed 5']
-    },
-    serviceQuality: {
-      type: Number,
-      min: [1, 'Rating must be at least 1'],
-      max: [5, 'Rating cannot exceed 5']
-    },
-    staffBehavior: {
-      type: Number,
-      min: [1, 'Rating must be at least 1'],
-      max: [5, 'Rating cannot exceed 5']
-    },
-    cleanliness: {
-      type: Number,
-      min: [1, 'Rating must be at least 1'],
-      max: [5, 'Rating cannot exceed 5']
-    },
-    ambiance: {
-      type: Number,
-      min: [1, 'Rating must be at least 1'],
-      max: [5, 'Rating cannot exceed 5']
-    },
-    valueForMoney: {
-      type: Number,
-      min: [1, 'Rating must be at least 1'],
-      max: [5, 'Rating cannot exceed 5']
-    },
-    punctuality: {
-      type: Number,
-      min: [1, 'Rating must be at least 1'],
-      max: [5, 'Rating cannot exceed 5']
     }
   },
   comment: {
@@ -64,69 +34,7 @@ const feedbackSchema = new mongoose.Schema({
     maxlength: [1000, 'Comment cannot exceed 1000 characters'],
     trim: true
   },
-  wouldRecommend: {
-    type: Boolean,
-    required: [true, 'Recommendation preference is required']
-  },
-  wouldReturnAsCustomer: {
-    type: Boolean,
-    required: [true, 'Return preference is required']
-  },
-  improvements: [{
-    category: {
-      type: String,
-      enum: [
-        'service-quality',
-        'staff-training',
-        'facility-cleanliness',
-        'booking-process',
-        'waiting-time',
-        'pricing',
-        'communication',
-        'amenities',
-        'accessibility',
-        'other'
-      ]
-    },
-    suggestion: String
-  }],
-  compliments: [{
-    category: {
-      type: String,
-      enum: [
-        'excellent-service',
-        'professional-staff',
-        'clean-facility',
-        'great-ambiance',
-        'value-for-money',
-        'punctual-service',
-        'friendly-staff',
-        'relaxing-experience',
-        'skilled-therapist',
-        'other'
-      ]
-    },
-    comment: String
-  }],
-  visitFrequency: {
-    type: String,
-    enum: ['first-time', 'occasional', 'regular', 'frequent'],
-    required: [true, 'Visit frequency is required']
-  },
-  discoveryMethod: {
-    type: String,
-    enum: [
-      'search-engine',
-      'social-media',
-      'friend-referral',
-      'advertisement',
-      'walk-by',
-      'repeat-customer',
-      'online-review',
-      'promotional-offer',
-      'other'
-    ]
-  },
+  // Note: simplified schema — optional advanced fields were removed per request
   anonymousSubmission: {
     type: Boolean,
     default: false
@@ -224,7 +132,10 @@ feedbackSchema.virtual('isRecent').get(function() {
 });
 
 // Indexes for better query performance
-feedbackSchema.index({ booking: 1 }, { unique: true });
+// Allow multiple feedback documents for the same booking when the booking
+// contains multiple services. Enforce uniqueness per booking+service+employee
+// so each service in a booking can get one feedback per employee.
+feedbackSchema.index({ booking: 1, service: 1, employee: 1 }, { unique: true });
 feedbackSchema.index({ client: 1 });
 feedbackSchema.index({ service: 1 });
 feedbackSchema.index({ employee: 1 });
