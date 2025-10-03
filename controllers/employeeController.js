@@ -3,6 +3,7 @@ const Employee = require('../models/Employee');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
 const Attendance = require('../models/Attendance');
+const Feedback = require('../models/Feedback');
 
 // Helper function to handle async errors
 const catchAsync = (fn) => {
@@ -1271,40 +1272,39 @@ const getMyRatings = catchAsync(async (req, res, next) => {
       message: 'Employee record not found'
     });
   }
+  // Debug: log incoming request to help trace why reviews may not appear
+  console.log(`getMyRatings called for user ${req.user._id} (employee ${employee._id}) - debug=${req.query.debug || 'false'}`);
 
-  // Get bookings with feedback for this employee
-  const bookingsWithFeedback = await Booking.find({
-    'services.employee': employee._id,
-    'feedback.rating': { $exists: true, $ne: null }
-  })
-  .populate({
-    path: 'client',
-    select: 'firstName lastName' // Only basic info
-  })
-  .select('feedback appointmentDate services.service')
-  .populate('services.service', 'name')
-  .sort({ 'feedback.submittedAt': -1 })
-  .limit(20);
+  // Fetch feedback documents for this employee from the Feedback collection
+  // Include public feedbacks that are not explicitly rejected so employee can see recent submissions
+  const feedbackDocs = await Feedback.find({ employee: employee._id, isPublic: true, status: { $ne: 'rejected' } })
+    .populate('client', 'firstName lastName')
+    .populate('booking', 'bookingNumber appointmentDate')
+    .populate('service', 'name')
+    .sort({ createdAt: -1 })
+    .limit(20);
 
-  // Calculate average rating
-  const ratings = bookingsWithFeedback.map(booking => booking.feedback.rating);
-  const averageRating = ratings.length > 0 
-    ? Math.round((ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length) * 100) / 100
+  console.log(`getMyRatings: found ${feedbackDocs.length} feedback documents (public & not rejected)`);
+
+  const ratings = feedbackDocs.map(f => (f.ratings && typeof f.ratings.overall === 'number') ? f.ratings.overall : null).filter(r => r !== null);
+
+  const averageRating = ratings.length > 0
+    ? Math.round((ratings.reduce((sum, r) => sum + r, 0) / ratings.length) * 100) / 100
     : 0;
 
-  // Format feedback to hide sensitive client information
-  const formattedFeedback = bookingsWithFeedback.map(booking => ({
-    _id: booking._id,
-    rating: booking.feedback.rating,
-    comment: booking.feedback.comment,
-    submittedAt: booking.feedback.submittedAt,
-    wouldRecommend: booking.feedback.wouldRecommend,
-    service: booking.services[0]?.service?.name || 'Unknown Service',
-    appointmentDate: booking.appointmentDate,
+  const breakdown = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  ratings.forEach(r => { const k = Math.floor(r); if (breakdown[k] !== undefined) breakdown[k]++; });
+
+  const formattedFeedback = feedbackDocs.map(f => ({
+    _id: f._id,
+    rating: f.ratings?.overall || 0,
+    comment: f.comment || '',
+    submittedAt: f.submittedAt || f.createdAt,
+    service: f.service?.name || 'Unknown Service',
+    appointmentDate: f.booking?.appointmentDate || null,
     client: {
-      firstName: booking.client.firstName,
-      lastName: booking.client.lastName
-      // No email or other contact details
+      firstName: f.client?.firstName || 'Client',
+      lastName: f.client?.lastName || ''
     }
   }));
 
@@ -1319,13 +1319,7 @@ const getMyRatings = catchAsync(async (req, res, next) => {
       ratings: {
         average: averageRating,
         total: ratings.length,
-        breakdown: {
-          5: ratings.filter(r => r === 5).length,
-          4: ratings.filter(r => r === 4).length,
-          3: ratings.filter(r => r === 3).length,
-          2: ratings.filter(r => r === 2).length,
-          1: ratings.filter(r => r === 1).length
-        }
+        breakdown
       },
       recentFeedback: formattedFeedback
     }
