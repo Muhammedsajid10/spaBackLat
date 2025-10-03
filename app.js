@@ -32,6 +32,7 @@ const membershipRoutes = require('./routes/membershipRoutes'); // Membership rou
 const paymentRoutes = require('./routes/paymentRoutes'); // Payment routes
 const giftCardRoutes = require('./routes/giftCardRoutes'); // Gift card routes
 const passwordRoutes = require('./routes/passwordRoutes');
+const categoryRoutes = require('./routes/categoryRoutes');
 
 // Import middleware
 const { isLoggedIn } = require('./middleware/authMiddleware');
@@ -176,6 +177,8 @@ app.use('/api/v1/memberships', membershipRoutes); // Add this line
 app.use('/api/v1/payments', paymentRoutes); // Mount payment routes
 app.use('/api/v1/giftcards', giftCardRoutes); // Mount gift card routes
 app.use('/api/v1/password', passwordRoutes); // Mount password reset routes
+
+app.use('/api/v1/categories', categoryRoutes);
 
 // Debug route to inspect registered mongoose models (temporary - remove in production once issue resolved)
 app.get('/api/v1/debug/models', (req, res) => {
