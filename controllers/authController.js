@@ -21,7 +21,7 @@ async function sendVerificationEmail(email, token) {
     secure: process.env.SMTP_SECURE === 'true',
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      pass: process.env.SENDGRID_API_KEY,
     },
   });
 
@@ -45,7 +45,7 @@ async function sendWelcomeEmail(email, password) {
     secure: process.env.SMTP_SECURE === 'true',
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      pass: process.env.SENDGRID_API_KEY,
     },
   });
 
@@ -73,7 +73,7 @@ async function sendEmployeeWelcomeVerificationEmail(email, password, verificatio
     secure: process.env.SMTP_SECURE === 'true',
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      pass: process.env.SENDGRID_API_KEY,
     },
   });
 
@@ -171,12 +171,18 @@ const signup = catchAsync(async (req, res, next) => {
   // Verification emails disabled
   let verificationToken;
 
-  // Send customized welcome+verification email to employee
-  if (role === 'employee') {
-    if (process.env.EMAIL_VERIFICATION_ENABLED === 'true') {
-      await sendEmployeeWelcomeVerificationEmail(email, password, verificationToken);
-    } else {
-      await sendWelcomeEmail(email, password);
+  // Send customized welcome+verification email to employee (only if email is enabled and configured)
+  if (role === 'employee' && process.env.EMAIL_VERIFICATION_ENABLED === 'true') {
+    try {
+      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SENDGRID_API_KEY) {
+        await sendEmployeeWelcomeVerificationEmail(email, password, verificationToken);
+        console.log('✅ Welcome email sent to employee:', email);
+      } else {
+        console.log('⚠️ SMTP not configured, skipping welcome email for employee:', email);
+      }
+    } catch (emailError) {
+      console.error('❌ Failed to send welcome email to employee:', email, emailError.message);
+      // Don't throw error - user creation should still succeed even if email fails
     }
   }
 
