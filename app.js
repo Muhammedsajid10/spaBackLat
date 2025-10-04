@@ -76,13 +76,23 @@ app.use(cors({
       'https://localhost:5175',
       'https://localhost:5176',
       'https://localhost:5177',
-      'https://tourmaline-choux-90907f.netlify.app'
+      'https://tourmaline-choux-90907f.netlify.app',
+      'https://admin.alloraspadubai.com',
+      'https://user.alloraspadubai.com'
     ];
     
     // Get allowed origins from environment or use defaults
-    const allowedOrigins = process.env.ALLOWED_ORIGINS ? 
-      process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()) : 
+    const allowedOrigins = process.env.CORS_ORIGIN ? 
+      process.env.CORS_ORIGIN.split(',').map(origin => origin.trim()) : 
       defaultAllowedOrigins;
+    
+    // Log CORS configuration on first request
+    if (!global.corsLogged) {
+      console.log('🔒 CORS Configuration:');
+      console.log('   Environment CORS_ORIGIN:', process.env.CORS_ORIGIN);
+      console.log('   Resolved allowed origins:', allowedOrigins);
+      global.corsLogged = true;
+    }
     
     // Allow all origins in development or if wildcard is specified
     if (process.env.NODE_ENV === 'development' || allowedOrigins.includes('*')) {
@@ -96,6 +106,7 @@ app.use(cors({
     
     console.log('CORS: Origin not allowed:', origin);
     console.log('CORS: Allowed origins:', allowedOrigins);
+    console.log('CORS: Environment CORS_ORIGIN:', process.env.CORS_ORIGIN);
     return callback(null, true); // Allow for now during deployment debugging
   },
   credentials: true,
