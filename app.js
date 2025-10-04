@@ -128,6 +128,7 @@ app.use('/api', limiter);
 // Body parser middleware
 app.use(express.json({ 
   limit: process.env.JSON_LIMIT || '10mb',
+  type: ['application/json', 'application/json; charset=utf-8'],
   verify: (req, res, buf) => {
     req.rawBody = buf;
   }
