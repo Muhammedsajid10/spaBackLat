@@ -50,7 +50,7 @@ class APIFeatures {
 
   paginate() {
     const page = this.queryString.page * 1 || 1;
-    const limit = this.queryString.limit * 1 || 100;
+    const limit = this.queryString.limit * 1 || 1000; // Increased default limit to 1000
     const skip = (page - 1) * limit;
 
     this.query = this.query.skip(skip).limit(limit);
@@ -74,6 +74,9 @@ const getAllClients = catchAsync(async (req, res, next) => {
     baseQuery = { role: 'client' };
   }
 
+  // Get total count for pagination info
+  const totalClients = await User.countDocuments(baseQuery);
+
   const features = new APIFeatures(
     User.find(baseQuery), 
     req.query
@@ -85,9 +88,21 @@ const getAllClients = catchAsync(async (req, res, next) => {
 
   const clients = await features.query;
 
+  // Calculate pagination info
+  const page = req.query.page * 1 || 1;
+  const limit = req.query.limit * 1 || 1000;
+  const totalPages = Math.ceil(totalClients / limit);
+
   res.status(200).json({
     success: true,
     results: clients.length,
+    totalCount: totalClients,
+    pagination: {
+      currentPage: page,
+      totalPages: totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1
+    },
     data: {
       clients
     }

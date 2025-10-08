@@ -15,17 +15,22 @@ const catchAsync = (fn) => {
 
 // Utility to send verification email
 async function sendVerificationEmail(email, token) {
-  const transporter = nodemailer.createTransport({
+  // Skip email sending if SMTP is not configured
+  if (!process.env.SMTP_HOST || !process.env.SMTP_PASS) {
+    console.log('📧 Email sending skipped - SMTP not configured');
+    return;
+  }
+
+  const transporter = nodemailer.createTransporter({
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,
     secure: process.env.SMTP_SECURE === 'true',
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SENDGRID_API_KEY,
+      pass: process.env.SMTP_PASS, // Use Gmail App Password
     },
   });
 
-  // const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/api/v1/auth/verify-email/${token}`;
   const verifyUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email/${token}`;
   const mailOptions = {
     from: process.env.EMAIL_FROM || 'no-reply@spa.com',
@@ -39,41 +44,58 @@ async function sendVerificationEmail(email, token) {
 
 // Utility to send welcome email to employee
 async function sendWelcomeEmail(email, password) {
-  const transporter = nodemailer.createTransport({
+  // Skip email sending if SMTP is not configured
+  if (!process.env.SMTP_HOST || !process.env.SMTP_PASS) {
+    console.log('📧 Welcome email skipped - SMTP not configured');
+    return;
+  }
+
+  const transporter = nodemailer.createTransporter({
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,
     secure: process.env.SMTP_SECURE === 'true',
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SENDGRID_API_KEY,
+      pass: process.env.SMTP_PASS, // Use Gmail App Password
     },
   });
 
   const mailOptions = {
     from: process.env.EMAIL_FROM || 'no-reply@spa.com',
     to: email,
-    subject: 'Welcome to Our Spa - Your Login Details',
-    html: `<h2>Welcome to Our Spa!</h2>
-      <p>Your account has been created. Here are your login details:</p>
-      <ul>
-        <li><b>Email:</b> ${email}</li>
-        <li><b>Password:</b> ${password}</li>
-      </ul>
-      <p><a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/login">Login here</a></p>
-      <p>Please change your password after your first login.</p>`
+    subject: 'Welcome to Allora Spa - Your Account Details',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #333;">Welcome to Allora Spa!</h2>
+        <p>Your employee account has been created. Here are your login details:</p>
+        <div style="background-color: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0;">
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Password:</strong> ${password}</p>
+        </div>
+        <p>Please log in to the employee panel and change your password for security.</p>
+        <p>Best regards,<br>Allora Spa Team</p>
+      </div>
+    `
   };
+  
   await transporter.sendMail(mailOptions);
 }
 
-// Utility to send welcome+verification email to employee
+// Updated utility to send welcome+verification email to employee  
 async function sendEmployeeWelcomeVerificationEmail(email, password, verificationToken) {
-  const transporter = nodemailer.createTransport({
+  // Skip email sending if SMTP is not configured
+  if (!process.env.SMTP_HOST || !process.env.SMTP_PASS) {
+    console.log('📧 Employee welcome email skipped - SMTP not configured');
+    return;
+  }
+
+  const transporter = nodemailer.createTransporter({
     host: process.env.SMTP_HOST,
     port: process.env.SMTP_PORT,
     secure: process.env.SMTP_SECURE === 'true',
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SENDGRID_API_KEY,
+      pass: process.env.SMTP_PASS, // Use Gmail App Password
     },
   });
 
@@ -174,7 +196,7 @@ const signup = catchAsync(async (req, res, next) => {
   // Send customized welcome+verification email to employee (only if email is enabled and configured)
   if (role === 'employee' && process.env.EMAIL_VERIFICATION_ENABLED === 'true') {
     try {
-      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SENDGRID_API_KEY) {
+      if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
         await sendEmployeeWelcomeVerificationEmail(email, password, verificationToken);
         console.log('✅ Welcome email sent to employee:', email);
       } else {
