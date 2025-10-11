@@ -1,6 +1,7 @@
 const GiftCard = require('../models/GiftCard');
 const User = require('../models/User');
 const crypto = require('crypto');
+const { sendGiftCardNotificationEmail } = require('./authController');
 
 // Local helper because relying on pre('save') to populate required fields causes validation errors
 // (Mongoose validates before pre('save') runs). We must set required fields prior to calling create().
@@ -216,9 +217,45 @@ const purchaseGiftCard = async (req, res) => {
     const populatedGiftCard = await GiftCard.findById(purchasedGiftCard._id)
       .populate('purchasedBy', 'firstName lastName email');
 
+    // Send email notification if recipient email is provided
+    let emailSent = false;
+    if (recipientEmail) {
+      try {
+        const purchaserFullName = populatedGiftCard.purchasedBy ? 
+          `${populatedGiftCard.purchasedBy.firstName || ''} ${populatedGiftCard.purchasedBy.lastName || ''}`.trim() : 
+          'Anonymous';
+
+        const giftCardDetails = {
+          name: populatedGiftCard.name,
+          code: populatedGiftCard.code,
+          value: populatedGiftCard.value,
+          currency: populatedGiftCard.currency,
+          expiryDate: populatedGiftCard.expiryDate,
+          purchaserName: purchaserFullName,
+          description: populatedGiftCard.description
+        };
+
+        await sendGiftCardNotificationEmail(
+          recipientEmail, 
+          recipientName || 'Valued Customer', 
+          giftCardDetails, 
+          personalMessage
+        );
+        emailSent = true;
+        console.log('✅ Gift card email sent successfully to:', recipientEmail);
+      } catch (emailError) {
+        console.error('❌ Failed to send gift card email:', emailError.message);
+        // Don't fail the gift card creation if email fails
+      }
+    }
+
     res.status(201).json({
       success: true,
-      data: { giftCard: populatedGiftCard }
+      data: { 
+        giftCard: populatedGiftCard,
+        emailSent: emailSent,
+        recipientEmail: emailSent ? recipientEmail : null
+      }
     });
   } catch (err) {
     // Surface detailed validation errors if present

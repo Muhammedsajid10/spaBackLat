@@ -4,6 +4,7 @@ const Service = require('../models/Service');
 const Employee = require('../models/Employee');
 const Attendance = require('../models/Attendance');
 const Feedback = require('../models/Feedback');
+const mongoose = require('mongoose');
 
 // Helper function to handle async errors
 const catchAsync = (fn) => {
@@ -433,6 +434,51 @@ const getEmployeeAnalytics = catchAsync(async (req, res, next) => {
   });
 });
 
+// Fetch documents from the finance_summary collection (admin/staff)
+const getFinanceSummary = catchAsync(async (req, res, next) => {
+  // Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), limit, skip, sortBy, order
+  const { startDate, endDate, limit = 200, skip = 0, sortBy = 'date', order = 'desc', all = 'false' } = req.query;
+
+  const filter = {};
+  if (startDate || endDate) {
+    filter.date = {};
+    if (startDate) {
+      const sd = new Date(startDate);
+      sd.setHours(0,0,0,0);
+      filter.date.$gte = sd;
+    }
+    if (endDate) {
+      const ed = new Date(endDate);
+      ed.setHours(23,59,59,999);
+      filter.date.$lte = ed;
+    }
+  }
+
+  // Access raw collection - useful for documents inserted outside Mongoose models
+  const collection = mongoose.connection.collection('finance_summary');
+
+  const sortOrder = order === 'asc' ? 1 : -1;
+  // If client explicitly requests all=true, bypass the 1000 cap (use with caution)
+  let results;
+  // Count total matching documents (useful for paging and verification)
+  let totalRecords = await collection.countDocuments(filter);
+
+  if (String(all).toLowerCase() === 'true') {
+    console.warn('Admin requested all finance_summary documents in one response. This may consume a lot of memory.');
+    results = await collection.find(filter).sort({ [sortBy]: sortOrder }).toArray();
+  } else {
+    const cursor = collection.find(filter).sort({ [sortBy]: sortOrder }).skip(parseInt(skip, 10)).limit(Math.min(parseInt(limit, 10), 1000));
+    results = await cursor.toArray();
+  }
+
+  res.status(200).json({
+    success: true,
+    totalRecords,
+    returnedCount: results.length,
+    data: results
+  });
+});
+
 // Get customer analytics
 const getCustomerAnalytics = catchAsync(async (req, res, next) => {
   // Customer acquisition trends
@@ -533,6 +579,52 @@ const getCustomerAnalytics = catchAsync(async (req, res, next) => {
       customerLTV,
       retentionAnalysis
     }
+  });
+});
+
+// Fetch attendance records (admin/staff)
+const getAllAttendance = catchAsync(async (req, res, next) => {
+  // Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), limit, skip, sortBy, order, all
+  const { startDate, endDate, limit = 200, skip = 0, sortBy = 'date', order = 'desc', all = 'false' } = req.query;
+
+  const filter = {};
+  if (startDate || endDate) {
+    filter.date = {};
+    if (startDate) {
+      const sd = new Date(startDate);
+      sd.setHours(0,0,0,0);
+      filter.date.$gte = sd;
+    }
+    if (endDate) {
+      const ed = new Date(endDate);
+      ed.setHours(23,59,59,999);
+      filter.date.$lte = ed;
+    }
+  }
+
+  const collection = mongoose.connection.collection('attendances');
+  // Some deployments may use different collection name; fall back to mongoose model name
+  // but allow raw collection access for ad-hoc documents
+
+  const sortOrder = order === 'asc' ? 1 : -1;
+
+  // Count total matching
+  const totalRecords = await collection.countDocuments(filter);
+
+  let results;
+  if (String(all).toLowerCase() === 'true') {
+    console.warn('Admin requested all attendance documents in one response. This may consume a lot of memory.');
+    results = await collection.find(filter).sort({ [sortBy]: sortOrder }).toArray();
+  } else {
+    const cursor = collection.find(filter).sort({ [sortBy]: sortOrder }).skip(parseInt(skip, 10)).limit(Math.min(parseInt(limit, 10), 1000));
+    results = await cursor.toArray();
+  }
+
+  res.status(200).json({
+    success: true,
+    totalRecords,
+    returnedCount: results.length,
+    data: results
   });
 });
 
@@ -697,6 +789,8 @@ module.exports = {
   getCustomerAnalytics,
   getSystemHealth,
   bulkUpdateUsers,
-  exportData
+  exportData,
+  getFinanceSummary,
+  getAllAttendance
 };
 

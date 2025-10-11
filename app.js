@@ -121,7 +121,7 @@ if (process.env.NODE_ENV === 'development') {
 
 // Rate limiting
 const limiter = rateLimit({
-  max: process.env.RATE_LIMIT_MAX || 5000, // Increased from 1000 to 5000
+  max: process.env.RATE_LIMIT_MAX || 10000, // Increased from 1000 to 5000
   windowMs: process.env.RATE_LIMIT_WINDOW || 15 * 60 * 1000, // Changed from 1 hour to 15 minutes
   message: {
     success: false,

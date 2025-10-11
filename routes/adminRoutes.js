@@ -18,6 +18,12 @@ router.get('/analytics/employees', isStaff, adminController.getEmployeeAnalytics
 router.get('/analytics/customers', isStaff, adminController.getCustomerAnalytics);
 router.get('/system/health', isAdmin, adminController.getSystemHealth);
 
+// Finance summary (raw collection) - supports optional date range and paging
+router.get('/finance-summary', isStaff, adminController.getFinanceSummary);
+
+// Attendance records - supports optional date range, paging, and all=true
+router.get('/attendance', isStaff, adminController.getAllAttendance);
+
 // Cash Movement Summary
 router.get('/cash-movement-summary', isStaff, getCashMovementSummary);
 

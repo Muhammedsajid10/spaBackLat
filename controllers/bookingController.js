@@ -334,7 +334,22 @@ const createBooking = async (req, res) => {
   try {
     console.log('🔍 FULL REQUEST BODY RECEIVED:', JSON.stringify(req.body, null, 2));
     
-  let { services: incomingServices, appointmentDate, notes, paymentMethod, client: clientData, selectionMode, paymentDetails: incomingPaymentDetails, finalAmount: incomingFinalAmount, giftCardCode } = req.body;
+  let { 
+    services: incomingServices, 
+    appointmentDate, 
+    notes, 
+    paymentMethod, 
+    client: clientData, 
+    selectionMode, 
+    paymentDetails: incomingPaymentDetails, 
+    finalAmount: incomingFinalAmount, 
+    giftCardCode,
+    originalClientName,
+    clientDisplayName,
+    specialRequests,
+    clientNotes,
+    internalNotes
+  } = req.body;
 
 
     if (!incomingServices || !Array.isArray(incomingServices) || incomingServices.length === 0) {
@@ -382,10 +397,39 @@ const createBooking = async (req, res) => {
         });
         await clientUser.save();
       }
+    } else if (clientData && clientData.name) {
+      // Handle client without email - create a temporary client with the provided name
+      console.log('🔍 Creating client without email:', clientData.name);
+      
+      let firstName = '';
+      let lastName = '';
+      if (clientData.name) {
+        const parts = clientData.name.split(' ');
+        firstName = parts[0];
+        lastName = parts.slice(1).join(' ');
+      } else {
+        firstName = clientData.firstName || '';
+        lastName = clientData.lastName || '';
+      }
+
+      // Create a unique temporary email to avoid conflicts
+      const tempEmail = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}@temp.local`;
+      
+      clientUser = new User({
+        firstName,
+        lastName,
+        email: tempEmail,
+        phone: clientData.phone || null,
+        password: 'defaultPassword123', // A temporary default password
+        role: 'client',
+        isEmailVerified: false, // Mark as not verified since it's a temp email
+      });
+      await clientUser.save();
+      console.log('✅ Created temporary client:', { id: clientUser._id, name: clientUser.fullName, email: clientUser.email });
     } else {
       // If no client data provided, use the current authenticated user as the client
       clientUser = req.user;
-      // console.log('Using authenticated user as client');
+      console.log('🔍 Using authenticated user as client:', clientUser.fullName);
     }
 
     // Ensure we have a valid client
@@ -493,7 +537,9 @@ const createBooking = async (req, res) => {
       totalDuration,
       paymentMethod,
       status: 'confirmed',
-      notes,
+      clientNotes: clientNotes || notes, // Use clientNotes if provided, fallback to notes
+      internalNotes: internalNotes || `Original client: ${originalClientName || clientDisplayName || 'Unknown'}`,
+      specialRequests: specialRequests || [], // Include special requests array
       bookedBy: clientUser._id,
     });
 

@@ -2,7 +2,18 @@ const Membership = require('../models/Membership');
 const Service = require('../models/Service');
 const User = require('../models/User');
 const mongoose = require('mongoose');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+let stripe = null;
+if (process.env.STRIPE_SECRET_KEY) {
+  try {
+    stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+  } catch (e) {
+    console.warn('⚠️ Stripe initialization failed:', e && e.message ? e.message : e);
+    stripe = null;
+  }
+} else {
+  console.log('⚠️ STRIPE_SECRET_KEY not configured - stripe functionality will be disabled (mock mode).');
+}
+const { sendMembershipNotificationEmail } = require('./authController');
 
 
 const getAllMembershipTemplates = async (req, res) => {
@@ -246,11 +257,19 @@ const purchaseMembership = async (req, res) => {
 
     // If payment is involved, verify Stripe payment first
     if (paymentIntentId) {
+      if (!stripe) {
+        console.warn('⚠️ Payment verification requested but stripe is not configured.');
+        return res.status(500).json({
+          success: false,
+          message: 'Server not configured for Stripe payments. Contact administrator or set STRIPE_SECRET_KEY in environment.'
+        });
+      }
+
       try {
         console.log('🔍 Verifying Stripe payment:', paymentIntentId);
-        
+
         const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-        
+
         if (paymentIntent.status !== 'succeeded') {
           return res.status(400).json({
             success: false,
@@ -264,7 +283,7 @@ const purchaseMembership = async (req, res) => {
           amount: paymentIntent.amount,
           status: paymentIntent.status
         });
-        
+
       } catch (stripeError) {
         console.error('❌ Stripe verification error:', stripeError);
         return res.status(400).json({
@@ -323,19 +342,68 @@ const purchaseMembership = async (req, res) => {
       { path: 'client', select: 'firstName lastName email' },
       { path: 'service', select: 'name' }
     ]);
+
+    // Calculate end date for email
+    const calculateEndDate = (startDate, period, unit) => {
+      const start = new Date(startDate);
+      switch (unit.toLowerCase()) {
+        case 'days':
+          return new Date(start.getTime() + (period * 24 * 60 * 60 * 1000));
+        case 'weeks':
+          return new Date(start.getTime() + (period * 7 * 24 * 60 * 60 * 1000));
+        case 'months':
+          return new Date(start.setMonth(start.getMonth() + period));
+        case 'years':
+          return new Date(start.setFullYear(start.getFullYear() + period));
+        default:
+          return null;
+      }
+    };
+
+    const endDate = calculateEndDate(
+      membership.startDate, 
+      membership.validityPeriod, 
+      membership.validityUnit
+    );
+
+    // Send membership notification email
+    try {
+      await sendMembershipNotificationEmail(
+        client.email,
+        `${client.firstName} ${client.lastName}`,
+        {
+          membershipName: membership.name,
+          serviceName: membership.serviceName,
+          numberOfSessions: membership.numberOfSessions,
+          validityPeriod: membership.validityPeriod,
+          validityUnit: membership.validityUnit,
+          startDate: membership.startDate,
+          endDate: endDate,
+          price: membership.price,
+          paymentType: membership.paymentType,
+          serviceType: membership.serviceType
+        }
+      );
+      console.log('✅ Membership notification email sent to:', client.email);
+    } catch (emailError) {
+      console.error('❌ Failed to send membership notification email:', emailError.message);
+      // Don't fail the membership creation if email fails
+    }
       
     console.log('🎉 Membership created successfully:', {
       id: membership._id,
       client: `${client.firstName} ${client.lastName}`,
       service: membership.serviceName,
       sessions: membership.numberOfSessions,
-      paymentVerified: !!paymentIntentId
+      paymentVerified: !!paymentIntentId,
+      emailSent: true
     });
       
     res.status(201).json({ 
       success: true, 
       data: { membership },
-      message: paymentIntentId ? 'Membership purchased and payment verified successfully' : 'Membership assigned successfully'
+      message: paymentIntentId ? 'Membership purchased and payment verified successfully. Confirmation email sent!' : 'Membership assigned successfully. Confirmation email sent!',
+      emailSent: true
     });
   } catch (err) {
     console.error('❌ Error purchasing membership:', err);
