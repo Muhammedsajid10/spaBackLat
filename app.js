@@ -170,8 +170,9 @@ app.use(hpp({
 // Compression middleware
 app.use(compression());
 
-// Serve static files
-app.use(express.static('public'));
+// Serve static files with caching headers to improve repeat-load performance
+// Cache static assets for 7 days; enable ETag for efficient validation
+app.use(express.static('public', { maxAge: '7d', etag: true }));
 
 // Note: Authentication middleware is applied per route as needed
 // isLoggedIn middleware is for rendered pages, not API routes
