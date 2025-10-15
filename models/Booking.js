@@ -8,19 +8,16 @@ const bookingSchema = new mongoose.Schema({
     trim: true
   },
   client: {
-    type: mongoose.Schema.ObjectId,
-    ref: 'User',
+    type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and String
     required: [true, 'Client is required']
   },
   services: [{
     service: {
-      type: mongoose.Schema.ObjectId,
-      ref: 'Service',
+      type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and String
       required: [true, 'Service is required']
     },
     employee: {
-      type: mongoose.Schema.ObjectId,
-      ref: 'Employee',
+      type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and String
       required: [true, 'Employee is required']
     },
     price: {
@@ -231,8 +228,55 @@ bookingSchema.virtual('canReschedule').get(function() {
   const hoursUntilAppointment = (appointmentDate - now) / (1000 * 60 * 60);
   const reschedulable = ['booked','pending','confirmed'];
   return hoursUntilAppointment > 12 && reschedulable.includes(this.status) && 
-         (!this.reschedule || this.reschedule.rescheduleCount < 2);
+         (!this.reschedule || this.reschedule.reschedule < 2);
 });
+
+// Virtual for client name - handle both ObjectId (populated) and string
+bookingSchema.virtual('clientName').get(function() {
+  if (typeof this.client === 'string') {
+    return this.client; // Direct string name
+  } else if (this.client && this.client.firstName) {
+    return `${this.client.firstName} ${this.client.lastName || ''}`.trim(); // Populated ObjectId
+  }
+  return 'Unknown Client';
+});
+
+// Virtual for client email - handle both ObjectId (populated) and string
+bookingSchema.virtual('clientEmail').get(function() {
+  if (typeof this.client === 'string') {
+    return null; // String clients don't have email
+  } else if (this.client && this.client.email) {
+    return this.client.email; // Populated ObjectId
+  }
+  return null;
+});
+
+// Method to get service name - handle both ObjectId (populated) and string
+bookingSchema.methods.getServiceName = function(serviceIndex = 0) {
+  const service = this.services[serviceIndex];
+  if (!service) return 'Unknown Service';
+  
+  if (typeof service.service === 'string') {
+    return service.service; // Direct string name
+  } else if (service.service && service.service.name) {
+    return service.service.name; // Populated ObjectId
+  }
+  return 'Unknown Service';
+};
+
+// Method to get employee name - handle both ObjectId (populated) and string
+bookingSchema.methods.getEmployeeName = function(serviceIndex = 0) {
+  const service = this.services[serviceIndex];
+  if (!service) return 'Unknown Employee';
+  
+  if (typeof service.employee === 'string') {
+    return service.employee; // Direct string name
+  } else if (service.employee && service.employee.user) {
+    const user = service.employee.user;
+    return `${user.firstName} ${user.lastName || ''}`.trim(); // Populated ObjectId
+  }
+  return 'Unknown Employee';
+};
 
 // Indexes for better query performance
 bookingSchema.index({ bookingNumber: 1 });
@@ -282,20 +326,30 @@ bookingSchema.pre('save', function(next) {
   next();
 });
 
-// Populate related data when querying
+// Populate related data when querying - handle both ObjectIds and strings
 bookingSchema.pre(/^find/, function(next) {
+  // Only populate if the field is an ObjectId, skip if it's a string
   this.populate({
     path: 'client',
-    select: 'firstName lastName email phone'
+    select: 'firstName lastName email phone',
+    match: function(doc) {
+      return mongoose.Types.ObjectId.isValid(doc.client);
+    }
   }).populate({
     path: 'services.service',
-    select: 'name category duration price'
+    select: 'name category duration price',
+    match: function(doc) {
+      return doc.services && doc.services.some(s => mongoose.Types.ObjectId.isValid(s.service));
+    }
   }).populate({
     path: 'services.employee',
     select: 'employeeId user',
     populate: {
       path: 'user',
       select: 'firstName lastName'
+    },
+    match: function(doc) {
+      return doc.services && doc.services.some(s => mongoose.Types.ObjectId.isValid(s.employee));
     }
   });
   next();

@@ -2,6 +2,8 @@ const Booking = require('../models/Booking');
 const Service = require('../models/Service');
 const Employee = require('../models/Employee');
 const User = require('../models/User');
+const EmailService = require('../services/emailService');
+const mongoose = require('mongoose');
 // const { apiUtils } = require('../utils/apiUtils');
 
 
@@ -351,6 +353,15 @@ const createBooking = async (req, res) => {
     internalNotes
   } = req.body;
 
+  console.log('🔍 CLIENT DATA DEBUG:', {
+    clientData,
+    originalClientName,
+    clientDisplayName,
+    hasClientData: !!clientData,
+    clientDataType: typeof clientData,
+    clientDataKeys: clientData ? Object.keys(clientData) : null
+  });
+
 
     if (!incomingServices || !Array.isArray(incomingServices) || incomingServices.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one service is required' });
@@ -386,20 +397,23 @@ const createBooking = async (req, res) => {
           lastName = clientData.lastName || '';
         }
 
+        // Clean phone number by removing spaces and non-digit characters (except +)
+        const cleanPhone = clientData.phone ? clientData.phone.replace(/[^\d+]/g, '') : null;
+        
         clientUser = new User({
           firstName,
           lastName,
           email: clientData.email,
-          phone: clientData.phone,
+          phone: cleanPhone,
           password: 'defaultPassword123', // A temporary default password
           role: 'client',
           isVerified: true, // Or false, depending on your flow
         });
         await clientUser.save();
       }
-    } else if (clientData && clientData.name) {
+    } else if (clientData && (clientData.name || clientData.firstName)) {
       // Handle client without email - create a temporary client with the provided name
-      console.log('🔍 Creating client without email:', clientData.name);
+      console.log('🔍 Creating client without email:', clientData.name || clientData.firstName);
       
       let firstName = '';
       let lastName = '';
@@ -413,17 +427,21 @@ const createBooking = async (req, res) => {
       }
 
       // Create a unique temporary email to avoid conflicts
-      const tempEmail = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}@temp.local`;
+      const tempEmail = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}@example.com`;
+      
+      // Clean phone number by removing spaces and non-digit characters (except +)
+      const cleanPhone = clientData.phone ? clientData.phone.replace(/[^\d+]/g, '') : null;
       
       clientUser = new User({
         firstName,
         lastName,
         email: tempEmail,
-        phone: clientData.phone || null,
+        phone: cleanPhone,
         password: 'defaultPassword123', // A temporary default password
         role: 'client',
         isEmailVerified: false, // Mark as not verified since it's a temp email
       });
+      console.log('💾 Saving client to database...');
       await clientUser.save();
       console.log('✅ Created temporary client:', { id: clientUser._id, name: clientUser.fullName, email: clientUser.email });
     } else {
@@ -434,10 +452,17 @@ const createBooking = async (req, res) => {
 
     // Ensure we have a valid client
     if (!clientUser || !clientUser._id) {
+      console.log('❌ Client validation failed:', { clientUser: !!clientUser, hasId: clientUser?._id });
       return res.status(400).json({ 
         message: 'Unable to determine client information. Please try logging in again.' 
       });
     }
+    
+    console.log('✅ Client validated successfully:', { 
+      id: clientUser._id, 
+      name: clientUser.fullName || `${clientUser.firstName} ${clientUser.lastName}`,
+      email: clientUser.email 
+    });
 
     // Load all active employees once for potential auto-assignment ('any')
     const allActiveEmployees = await Employee.find({ isActive: true })
@@ -448,14 +473,42 @@ const createBooking = async (req, res) => {
     const existingDayBookings = await Booking.find({ appointmentDate: { $gte: dayStart, $lt: dayEnd } })
       .select('services.startTime services.endTime services.employee');
     const bookingsByEmployee = new Map();
+    
+    // Helper function to normalize employee identifier for conflict checking
+    const getEmployeeKey = (employee) => {
+      if (!employee) return null;
+      if (mongoose.Types.ObjectId.isValid(employee)) {
+        return String(employee); // ObjectId format
+      }
+      if (typeof employee === 'string') {
+        // String format (Python-created) - try to find matching employee ObjectId
+        const matchingEmployee = allActiveEmployees.find(emp => {
+          const empFullName = `${emp.user?.firstName || ''} ${emp.user?.lastName || ''}`.trim();
+          return empFullName.toLowerCase() === employee.toLowerCase() ||
+                 emp.user?.firstName?.toLowerCase() === employee.toLowerCase() ||
+                 empFullName.toLowerCase().includes(employee.toLowerCase()) ||
+                 employee.toLowerCase().includes(empFullName.toLowerCase());
+        });
+        return matchingEmployee ? String(matchingEmployee._id) : null;
+      }
+      return null;
+    };
+    
     existingDayBookings.forEach(b => {
       (b.services || []).forEach(svc => {
         if (!svc.employee) return;
-        const key = String(svc.employee);
+        const key = getEmployeeKey(svc.employee);
+        if (!key) {
+          console.log('⚠️ Could not determine employee key for conflict check:', svc.employee);
+          return; // Skip if we can't determine the employee
+        }
         if (!bookingsByEmployee.has(key)) bookingsByEmployee.set(key, []);
         bookingsByEmployee.get(key).push({ start: new Date(svc.startTime), end: new Date(svc.endTime) });
+        console.log(`📅 Added existing booking for employee ${key}: ${new Date(svc.startTime)} - ${new Date(svc.endTime)}`);
       });
     });
+
+    console.log(`🔍 Total existing bookings by employee:`, Array.from(bookingsByEmployee.entries()).map(([k, v]) => ({ employeeId: k, bookings: v.length })));
 
     const overlaps = (ranges, start, end) => ranges.some(r => start < r.end && end > r.start);
     const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
@@ -506,9 +559,15 @@ const createBooking = async (req, res) => {
         }
         // Overlap check for this employee
         const existingRanges = bookingsByEmployee.get(String(employeeId)) || [];
+        console.log(`🔍 Checking conflicts for employee ${employeeId}:`);
+        console.log(`   New booking: ${startTime} - ${endTime}`);
+        console.log(`   Existing ranges:`, existingRanges.map(r => `${r.start} - ${r.end}`));
+        
         if (overlaps(existingRanges, startTime, endTime)) {
+          console.log(`❌ CONFLICT DETECTED for employee ${employeeId}`);
           return res.status(409).json({ success: false, message: `Employee has a conflicting booking for service '${serviceDoc.name}'.` });
         }
+        console.log(`✅ No conflict for employee ${employeeId}`);
         if (!bookingsByEmployee.has(String(employeeId))) bookingsByEmployee.set(String(employeeId), []);
         bookingsByEmployee.get(String(employeeId)).push({ start: startTime, end: endTime });
       }
@@ -631,8 +690,6 @@ const createBooking = async (req, res) => {
     }
 
     await newBooking.save();
-
-
 
     // If membership payment: deduct session immediately
     // Handle both admin membership discounts and direct membership payments
@@ -807,6 +864,26 @@ const createBooking = async (req, res) => {
           select: 'firstName lastName',
         },
       });
+
+    // Update the newBooking with populated client for email sending
+    if (populatedBooking && populatedBooking.client && populatedBooking.client.email) {
+      // Send booking confirmation email with populated booking
+      try {
+        const emailService = new EmailService();
+        
+        // Prepare payment info for email
+        const paymentInfo = {
+          amount: populatedBooking.finalAmount * 100 // Convert to cents for email service
+        };
+        
+        console.log('📧 Sending booking confirmation email to:', populatedBooking.client.email);
+        const emailResult = await emailService.sendBookingConfirmation(populatedBooking, paymentInfo);
+        console.log('✅ Booking confirmation email sent:', emailResult.success ? 'SUCCESS' : 'FAILED');
+      } catch (emailError) {
+        console.error('❌ Failed to send booking confirmation email:', emailError);
+        // Don't fail the booking if email fails
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -1045,24 +1122,205 @@ const getAllBookings = async (req, res) => {
     
     console.log('📋 Final date filter applied:', JSON.stringify(dateFilter, null, 2));
     
+    // Fetch bookings with conditional population for mixed data types
     const bookings = await Booking.find(dateFilter)
-      .populate('client', 'firstName lastName email')
-      .populate('services.service', 'name price')
-      .populate({
-        path: 'services.employee',
-        select: 'employeeId user',
-        populate: {
-          path: 'user',
-          select: 'firstName lastName'
-        }
-      })
+      .lean() // Use lean for better performance
       .sort({ appointmentDate: -1 });
 
-    // console.log(`📊 Found ${bookings.length} bookings matching date filter`);
+    console.log(`🔍 Raw bookings found: ${bookings.length}`);
+    if (bookings.length > 0) {
+      console.log('📝 Sample raw booking:', JSON.stringify(bookings[0], null, 2));
+    }
+
+    // Manual population for mixed data types
+    const User = require('../models/User');
+    const Service = require('../models/Service');
+    const Employee = require('../models/Employee');
+
+    // Process each booking to normalize mixed data types for calendar consistency
+    const processedBookings = await Promise.all(bookings.map(async (booking) => {
+      // Normalize client data
+      console.log(`🔍 Client debug - Type: ${typeof booking.client}, Value: ${booking.client}, IsObjectId: ${mongoose.Types.ObjectId.isValid(booking.client)}`);
+      
+      if (typeof booking.client === 'object' && booking.client !== null && booking.client._id) {
+        // Already a populated object, ensure it has the fullName property
+        if (booking.client.firstName || booking.client.lastName) {
+          booking.client.fullName = `${booking.client.firstName || ''} ${booking.client.lastName || ''}`.trim() || 'Unknown Client';
+        } else {
+          // Object but no name fields, might need to populate
+          try {
+            const clientData = await User.findById(booking.client._id).select('firstName lastName email').lean();
+            if (clientData) {
+              booking.client = {
+                _id: clientData._id,
+                firstName: clientData.firstName,
+                lastName: clientData.lastName,
+                email: clientData.email,
+                fullName: `${clientData.firstName} ${clientData.lastName}`.trim()
+              };
+            }
+          } catch (err) {
+            console.log('Failed to populate client object:', err.message);
+            booking.client.fullName = booking.client._id.toString();
+          }
+        }
+      } else if (mongoose.Types.ObjectId.isValid(booking.client) && typeof booking.client !== 'object') {
+        // For ObjectId clients (string or ObjectId), populate the data
+        try {
+          const clientData = await User.findById(booking.client).select('firstName lastName email').lean();
+          if (clientData) {
+            booking.client = {
+              _id: clientData._id,
+              firstName: clientData.firstName,
+              lastName: clientData.lastName,
+              email: clientData.email,
+              fullName: `${clientData.firstName} ${clientData.lastName}`.trim()
+            };
+          }
+        } catch (err) {
+          // Fallback if population fails
+          booking.client = {
+            _id: booking.client,
+            firstName: 'Unknown',
+            lastName: 'Client',
+            email: '',
+            fullName: 'Unknown Client'
+          };
+        }
+      } else if (typeof booking.client === 'string') {
+        // For string clients (Python-created non-ObjectId)
+        booking.client = {
+          _id: null,
+          firstName: booking.client,
+          lastName: '',
+          email: '',
+          fullName: booking.client
+        };
+      } else if (typeof booking.client === 'object' && booking.client !== null) {
+        // Already populated object, just ensure fullName exists
+        booking.client.fullName = `${booking.client.firstName || ''} ${booking.client.lastName || ''}`.trim() || 'Unknown Client';
+      } else {
+        // Catch-all for any other format
+        console.log(`⚠️ Unexpected client format:`, booking.client);
+        booking.client = {
+          _id: booking.client,
+          firstName: 'Unknown',
+          lastName: 'Client',
+          email: '',
+          fullName: booking.client ? booking.client.toString() : 'Unknown Client'
+        };
+      }
+
+      // Normalize services data
+      if (booking.services) {
+        booking.services = await Promise.all(booking.services.map(async (service) => {
+          // Normalize service data
+          if (typeof service.service === 'string') {
+            // For string services (Python-created)
+            service.service = {
+              _id: null,
+              name: service.service,
+              price: service.price || 0
+            };
+          } else if (mongoose.Types.ObjectId.isValid(service.service)) {
+            // For ObjectId services, populate the data
+            try {
+              const serviceData = await Service.findById(service.service).select('name price').lean();
+              if (serviceData) {
+                service.service = {
+                  _id: serviceData._id,
+                  name: serviceData.name,
+                  price: serviceData.price
+                };
+              }
+            } catch (err) {
+              // Fallback if population fails
+              service.service = {
+                _id: service.service,
+                name: 'Unknown Service',
+                price: service.price || 0
+              };
+            }
+          }
+
+          // Normalize employee data
+          console.log(`🔍 Employee debug - Type: ${typeof service.employee}, Value: ${service.employee}, IsObjectId: ${mongoose.Types.ObjectId.isValid(service.employee)}`);
+          
+          if (mongoose.Types.ObjectId.isValid(service.employee) && typeof service.employee !== 'object') {
+            // For ObjectId employees (string or ObjectId), populate the data
+            try {
+              const employeeData = await Employee.findById(service.employee)
+                .populate('user', 'firstName lastName email')
+                .select('employeeId user')
+                .lean();
+              if (employeeData && employeeData.user) {
+                service.employee = {
+                  _id: employeeData._id,
+                  employeeId: employeeData.employeeId,
+                  fullName: `${employeeData.user.firstName} ${employeeData.user.lastName}`.trim(),
+                  user: employeeData.user
+                };
+              }
+            } catch (err) {
+              // Fallback if population fails
+              service.employee = {
+                _id: service.employee,
+                employeeId: 'Unknown',
+                fullName: 'Unknown Employee',
+                user: {
+                  firstName: 'Unknown',
+                  lastName: 'Employee',
+                  email: ''
+                }
+              };
+            }
+          } else if (typeof service.employee === 'string') {
+            // For string employees (Python-created non-ObjectId)
+            service.employee = {
+              _id: null,
+              employeeId: null,
+              fullName: service.employee,
+              user: {
+                firstName: service.employee,
+                lastName: '',
+                email: ''
+              }
+            };
+          } else if (typeof service.employee === 'object' && service.employee !== null) {
+            // Already populated object, ensure fullName exists
+            if (service.employee.user) {
+              service.employee.fullName = `${service.employee.user.firstName || ''} ${service.employee.user.lastName || ''}`.trim() || 'Unknown Employee';
+            }
+          } else {
+            // Catch-all for any other format
+            console.log(`⚠️ Unexpected employee format:`, service.employee);
+            service.employee = {
+              _id: service.employee,
+              employeeId: 'Unknown',
+              fullName: service.employee ? service.employee.toString() : 'Unknown Employee',
+              user: {
+                firstName: 'Unknown',
+                lastName: 'Employee',
+                email: ''
+              }
+            };
+          }
+
+          return service;
+        }));
+      }
+
+      return booking;
+    }));
+
+    console.log(`✅ Processed bookings: ${processedBookings.length}`);
+    if (processedBookings.length > 0) {
+      console.log('📝 Sample processed booking:', JSON.stringify(processedBookings[0], null, 2));
+    }
     
     // Debug: Log the date ranges of found bookings
-    if (bookings.length > 0) {
-      bookings.forEach((booking, index) => {
+    if (processedBookings.length > 0) {
+      processedBookings.forEach((booking, index) => {
         const appointmentDate = new Date(booking.appointmentDate);
         // console.log(`📝 Booking ${index + 1}: Appointment date ${appointmentDate.toISOString().split('T')[0]}`);
         booking.services.forEach((service, serviceIndex) => {
@@ -1076,8 +1334,8 @@ const getAllBookings = async (req, res) => {
 
     res.json({
       success: true,
-      results: bookings.length,
-      data: { bookings }
+      results: processedBookings.length,
+      data: { bookings: processedBookings }
     });
   } catch (error) {
     console.error('Error fetching all bookings:', error);

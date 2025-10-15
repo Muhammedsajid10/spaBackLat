@@ -1,5 +1,6 @@
 
 const sgMail = require('@sendgrid/mail');
+const nodemailer = require('nodemailer');
 
 // Set SendGrid API key from env
 if (process.env.SENDGRID_API_KEY) {
@@ -27,23 +28,40 @@ class EmailService {
         subject: `Booking Confirmation - ${booking.bookingNumber}`,
         html: emailHTML
       };
-      if (!process.env.SENDGRID_API_KEY) {
-        throw new Error('SendGrid API key not configured (SENDGRID_API_KEY)');
+      // Prefer SendGrid if configured, otherwise fallback to SMTP
+      if (process.env.SENDGRID_API_KEY) {
+        const [result] = await sgMail.send(msg);
+        console.log('Email sent successfully (SendGrid):', result && result.headers ? result.headers['x-message-id'] : 'no message id');
+        return {
+          success: true,
+          messageId: result && result.headers ? result.headers['x-message-id'] : undefined
+        };
       }
-      const [result] = await sgMail.send(msg);
-      console.log('Email sent successfully:', result && result.headers ? result.headers['x-message-id'] : 'no message id');
-      return {
-        success: true,
-        messageId: result && result.headers ? result.headers['x-message-id'] : undefined
-      };
+      // Fallback to SMTP if SendGrid not configured
+      const smtpResult = await this._sendViaSMTP(msg);
+      console.log('Email sent successfully (SMTP):', smtpResult.messageId || 'no message id');
+      return { success: true, messageId: smtpResult.messageId };
     } catch (error) {
       // If SendGrid returns a response body, log it for debugging
       if (error && error.response && error.response.body) {
         console.error('SendGrid response body:', JSON.stringify(error.response.body));
       }
-      console.error('Error sending booking confirmation email:', error);
-      const extra = error && error.response && error.response.body ? ` | sendgrid:${JSON.stringify(error.response.body)}` : '';
-      throw new Error(`Failed to send confirmation email: ${error.message}${extra}`);
+      console.error('Error sending booking confirmation email (primary path):', error);
+      // As a resilience fallback: if SendGrid path failed and SMTP is configured, try SMTP once
+      try {
+        const fallbackMsg = {
+          to: booking.client.email,
+          from: process.env.EMAIL_FROM,
+          subject: `Booking Confirmation - ${booking.bookingNumber}`,
+          html: this.generateBookingConfirmationHTML(booking, payment && typeof payment.amount === 'number' ? payment.amount / 100 : undefined)
+        };
+        const smtpResult = await this._sendViaSMTP(fallbackMsg);
+        console.log('Email sent successfully on fallback (SMTP):', smtpResult.messageId || 'no message id');
+        return { success: true, messageId: smtpResult.messageId };
+      } catch (fallbackErr) {
+        const extra = error && error.response && error.response.body ? ` | sendgrid:${JSON.stringify(error.response.body)}` : '';
+        throw new Error(`Failed to send confirmation email: ${error.message}${extra} | smtp:${fallbackErr.message}`);
+      }
     }
   }
 
@@ -203,19 +221,22 @@ class EmailService {
         subject,
         html
       };
-      if (!process.env.SENDGRID_API_KEY) {
-        throw new Error('SendGrid API key not configured (SENDGRID_API_KEY)');
+      if (process.env.SENDGRID_API_KEY) {
+        const [result] = await sgMail.send(msg);
+        return {
+          success: true,
+          messageId: result && result.headers ? result.headers['x-message-id'] : undefined
+        };
       }
-      const [result] = await sgMail.send(msg);
-      return {
-        success: true,
-        messageId: result && result.headers ? result.headers['x-message-id'] : undefined
-      };
+      // Fallback to SMTP when SendGrid is not available
+      const smtpResult = await this._sendViaSMTP(msg);
+      return { success: true, messageId: smtpResult.messageId };
     } catch (error) {
       if (error && error.response && error.response.body) {
         console.error('SendGrid response body:', JSON.stringify(error.response.body));
       }
-      console.error('Error sending email:', error);
+      console.error('Error sending email (primary path):', error);
+      // Final failure
       const extra = error && error.response && error.response.body ? ` | sendgrid:${JSON.stringify(error.response.body)}` : '';
       throw new Error(`Failed to send email: ${error.message}${extra}`);
     }
@@ -326,6 +347,29 @@ class EmailService {
     </body>
     </html>
     `;
+  }
+
+  async _sendViaSMTP(msg) {
+    // Ensure SMTP envs are present
+    const { SMTP_HOST, SMTP_USER, SMTP_PASS } = process.env;
+    if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
+      throw new Error('SMTP not configured (SMTP_HOST/SMTP_USER/SMTP_PASS)');
+    }
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT || 587,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+    return await transporter.sendMail({
+      from: msg.from || process.env.EMAIL_FROM,
+      to: msg.to,
+      subject: msg.subject,
+      html: msg.html,
+    });
   }
 }
 
