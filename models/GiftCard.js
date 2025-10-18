@@ -149,34 +149,38 @@ giftCardSchema.methods.generateUniqueCode = function() {
 };
 
 giftCardSchema.methods.useGiftCard = function(amount, userId, bookingId, notes) {
+  console.log('[GiftCard.useGiftCard] Called with:', { amount, userId, bookingId, notes });
   if (this.isExpired) {
+    console.error('[GiftCard.useGiftCard] Gift card expired:', this.code);
     throw new Error('Gift card has expired');
   }
-  
   if (this.remainingValue < amount) {
+    console.error('[GiftCard.useGiftCard] Insufficient balance:', { code: this.code, remainingValue: this.remainingValue, amount });
     throw new Error('Insufficient gift card balance');
   }
-
   if (this.status === 'Used' || this.status === 'Cancelled') {
+    console.error('[GiftCard.useGiftCard] Gift card not available for use:', { code: this.code, status: this.status });
     throw new Error('Gift card is not available for use');
   }
-
   this.usageHistory.push({
     amountUsed: amount,
     usedBy: userId,
     bookingId: bookingId,
     notes: notes
   });
-
   this.remainingValue -= amount;
-
+  console.log('[GiftCard.useGiftCard] After deduction:', { code: this.code, remainingValue: this.remainingValue });
   if (this.remainingValue <= 0) {
     this.status = 'Used';
+    console.log('[GiftCard.useGiftCard] Status updated to Used:', this.code);
   } else {
     this.status = 'Partially Used';
+    console.log('[GiftCard.useGiftCard] Status updated to Partially Used:', this.code);
   }
-
-  return this.save();
+  return this.save().then(result => {
+    console.log('[GiftCard.useGiftCard] Saved:', { code: this.code, status: this.status, remainingValue: this.remainingValue });
+    return result;
+  });
 };
 
 giftCardSchema.methods.validateForUse = function() {

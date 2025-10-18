@@ -21,7 +21,7 @@ const getAllMembershipTemplates = async (req, res) => {
     console.log('📋 Fetching membership templates...');
     
     const memberships = await Membership.find({ isTemplate: true })
-      .populate('service', 'name price duration')
+      .populate('services', 'name price duration')
       .sort({ createdAt: -1 });
     
     res.status(200).json({ 
@@ -43,7 +43,7 @@ const getAllPurchasedMemberships = async (req, res) => {
   try {
     let memberships = await Membership.find({ isTemplate: false })
       .populate('client', 'firstName lastName email')
-      .populate('service', 'name price duration')
+      .populate('services', 'name price duration')
       .sort({ purchaseDate: -1 });
 
     // Debug: log how many have populated client
@@ -102,8 +102,8 @@ const createMembershipTemplate = async (req, res) => {
     console.log('🔍 Request user:', req.user ? req.user._id : 'No user');
     
     // Validate required fields
-    const requiredFields = ['name', 'description', 'service', 'price', 'validityPeriod', 'validityUnit', 'serviceType'];
-    const missingFields = requiredFields.filter(field => !req.body[field]);
+  const requiredFields = ['name', 'description', 'services', 'price', 'validityPeriod', 'validityUnit', 'serviceType'];
+  const missingFields = requiredFields.filter(field => !req.body[field] || (Array.isArray(req.body[field]) && req.body[field].length === 0));
     
     if (missingFields.length > 0) {
       console.log('❌ Missing required fields:', missingFields);
@@ -114,31 +114,26 @@ const createMembershipTemplate = async (req, res) => {
       });
     }
     
-    // Validate service exists
-    if (!req.body.service) {
+    // Validate services exist
+    if (!req.body.services || !Array.isArray(req.body.services) || req.body.services.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Service is required for membership template'
+        message: 'At least one service is required for membership template'
       });
     }
-    
-    console.log('🔍 Looking for service with ID:', req.body.service);
-    
-    // Get service details to store service name
-    const service = await Service.findById(req.body.service);
-    if (!service) {
-      console.log('❌ Service not found with ID:', req.body.service);
+    console.log('🔍 Looking for services with IDs:', req.body.services);
+    const serviceDocs = await Service.find({ _id: { $in: req.body.services } });
+    if (!serviceDocs || serviceDocs.length !== req.body.services.length) {
       return res.status(404).json({
         success: false,
-        message: 'Service not found'
+        message: 'One or more services not found'
       });
     }
-    
-    console.log('✅ Service found:', service.name);
-    
+    const serviceNames = serviceDocs.map(s => s.name);
+    console.log('✅ Services found:', serviceNames);
     const membershipData = {
       ...req.body,
-      serviceName: service.name,
+      serviceNames,
       isTemplate: true,
       createdBy: req.user ? req.user._id : null,
       status: 'Draft'
@@ -296,7 +291,7 @@ const purchaseMembership = async (req, res) => {
 
     // Fetch template
     const template = await Membership.findOne({ _id: templateId, isTemplate: true })
-      .populate('service', 'name');
+      .populate('services', 'name');
     if (!template) {
       return res.status(404).json({ 
         success: false, 
@@ -312,6 +307,7 @@ const purchaseMembership = async (req, res) => {
         message: 'Client not found' 
       });
     }
+    console.log('Assigning membership to client:', clientId, client._id, client.email);
 
     const purchaseStart = startDate ? new Date(startDate) : new Date();
 
@@ -319,15 +315,15 @@ const purchaseMembership = async (req, res) => {
       name: template.name,
       description: template.description,
       serviceType: template.serviceType,
-      service: template.service,
-      serviceName: template.serviceName || (template.service ? template.service.name : 'Unknown Service'),
+      services: template.services,
+      serviceNames: template.serviceNames,
       numberOfSessions: template.numberOfSessions,
       paymentType: paymentType || template.paymentType,
       price: price != null ? price : template.price,
       currency: template.currency,
       validityPeriod: template.validityPeriod,
       validityUnit: template.validityUnit,
-      client: client._id,
+      client: client._id, // Ensure this is set
       status: 'Active',
       startDate: purchaseStart,
       purchaseDate: purchaseStart,
@@ -335,12 +331,13 @@ const purchaseMembership = async (req, res) => {
       createdBy: req.user ? req.user._id : null,
       paymentIntentId: paymentIntentId || null
     };
+    console.log('Purchased membership data:', purchasedData);
 
     let membership = await Membership.create(purchasedData);
     // populate client for immediate frontend display
     membership = await membership.populate([
       { path: 'client', select: 'firstName lastName email' },
-      { path: 'service', select: 'name' }
+      { path: 'services', select: 'name' }
     ]);
 
     // Calculate end date for email
@@ -373,7 +370,7 @@ const purchaseMembership = async (req, res) => {
         `${client.firstName} ${client.lastName}`,
         {
           membershipName: membership.name,
-          serviceName: membership.serviceName,
+          serviceNames: membership.serviceNames,
           numberOfSessions: membership.numberOfSessions,
           validityPeriod: membership.validityPeriod,
           validityUnit: membership.validityUnit,
@@ -393,7 +390,7 @@ const purchaseMembership = async (req, res) => {
     console.log('🎉 Membership created successfully:', {
       id: membership._id,
       client: `${client.firstName} ${client.lastName}`,
-      service: membership.serviceName,
+  services: membership.serviceNames,
       sessions: membership.numberOfSessions,
       paymentVerified: !!paymentIntentId,
       emailSent: true
@@ -438,7 +435,7 @@ const getUserMemberships = async (req, res) => {
       isTemplate: false,
       status: { $in: ['Active', 'Partially Used'] }
     })
-    .populate('service', 'name price duration')
+  .populate('services', 'name price duration')
     .sort({ purchaseDate: -1 });
 
     res.status(200).json({
@@ -470,11 +467,11 @@ const checkMembershipForService = async (req, res) => {
 
     const membership = await Membership.findOne({
       client: userId,
-      service: serviceId,
+      services: serviceId,
       isTemplate: false,
       status: { $in: ['Active', 'Partially Used'] },
       remainingSessions: { $gt: 0 }
-    }).populate('service', 'name price duration');
+    }).populate('services', 'name price duration');
 
     res.status(200).json({
       success: true,

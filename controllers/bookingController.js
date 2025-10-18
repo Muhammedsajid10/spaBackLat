@@ -822,30 +822,29 @@ const createBooking = async (req, res) => {
           }
         }
         if (gc) {
+          console.log('[BookingController] Gift card found for redemption:', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue });
           // Skip if already fully used/expired/cancelled
-            if (['Used','Expired','Cancelled'].includes(gc.status) || gc.remainingValue <= 0) {
-              console.warn('Gift card provided is not usable (status or balance). Skipping redemption.');
-            } else {
-              // Recalculate safe redeem amount: if frontend sent redeemAmount use min of booking total
-              const requestedRedeem = Number(newBooking.paymentDetails?.redeemAmount) || 0;
-              const maxAllowed = Math.min(gc.remainingValue, totalAmount);
-              const redeemAmount = Math.min(requestedRedeem || maxAllowed, maxAllowed);
-              if (redeemAmount > 0) {
-                gc.remainingValue -= redeemAmount;
-                gc.usageHistory.push({
-                  amountUsed: redeemAmount,
-                  usedBy: clientUser._id,
-                  bookingId: newBooking._id,
-                  notes: 'Redeemed at booking creation'
-                });
-                if (gc.remainingValue <= 0) gc.status = 'Used';
-                else if (gc.remainingValue < gc.value) gc.status = 'Partially Used';
-                await gc.save();
-              }
+          if (["Used","Expired","Cancelled"].includes(gc.status) || gc.remainingValue <= 0) {
+            console.warn('[BookingController] Gift card not usable (status or balance):', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue });
+          } else {
+            // Recalculate safe redeem amount: if frontend sent redeemAmount use min of booking total
+            const requestedRedeem = Number(newBooking.paymentDetails?.redeemAmount) || 0;
+            const maxAllowed = Math.min(gc.remainingValue, totalAmount);
+            const redeemAmount = Math.min(requestedRedeem || maxAllowed, maxAllowed);
+            console.log('[BookingController] Redeem amount calculation:', { requestedRedeem, maxAllowed, redeemAmount });
+            if (redeemAmount > 0) {
+              const result = await gc.useGiftCard(redeemAmount, clientUser._id, newBooking._id, 'Redeemed at booking creation');
+              console.log('[BookingController] Gift card redemption result:', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue, result });
+              // Reload gift card to verify status
+              const reloadedGC = await GiftCard.findById(gc._id);
+              console.log('[BookingController] Gift card after redemption:', { code: reloadedGC.code, status: reloadedGC.status, remainingValue: reloadedGC.remainingValue });
             }
+          }
+        } else {
+          console.warn('[BookingController] No gift card found for redemption.');
         }
       } catch (gcErr) {
-        console.error('Gift card redemption error (createBooking):', gcErr.message);
+        console.error('[BookingController] Gift card redemption error (createBooking):', gcErr.message);
       }
     }
 

@@ -22,12 +22,12 @@ const membershipSchema = new mongoose.Schema({
     required: [true, 'Service type is required'],
     default: 'Limited'
   },
-  service: {
-    type: mongoose.Schema.Types.ObjectId,
+  services: {
+    type: [mongoose.Schema.Types.ObjectId],
     ref: 'Service',
-    required: [true, 'Service is required']
+    required: [true, 'At least one service is required']
   },
-  serviceName: String, // Store service name for reference
+  serviceNames: [String], // Store service names for reference
   numberOfSessions: {
     type: Number,
     required: function() {
@@ -147,13 +147,12 @@ membershipSchema.virtual('daysRemaining').get(function() {
   return Math.max(0, diffDays);
 });
 
-// Pre-save middleware for calculating end date, populating service name, and updating status
+// Pre-save middleware for calculating end date, populating service names, and updating status
 membershipSchema.pre('save', async function(next) {
   // Calculate end date
   if (this.isNew && this.startDate && this.validityPeriod && this.validityUnit) {
     const startDate = new Date(this.startDate);
     let endDate = new Date(startDate);
-    
     switch (this.validityUnit) {
       case 'days':
         endDate.setDate(endDate.getDate() + this.validityPeriod);
@@ -165,28 +164,24 @@ membershipSchema.pre('save', async function(next) {
         endDate.setFullYear(endDate.getFullYear() + this.validityPeriod);
         break;
     }
-    
     this.endDate = endDate;
   }
-  
-  // Populate service name if we have a service ID but no service name
-  if (this.service && !this.serviceName) {
+
+  // Populate service names if we have service IDs but no serviceNames
+  if (this.services && (!this.serviceNames || this.serviceNames.length === 0)) {
     try {
       const Service = mongoose.model('Service');
-      const serviceDoc = await Service.findById(this.service);
-      if (serviceDoc) {
-        this.serviceName = serviceDoc.name;
-      }
+      const serviceDocs = await Service.find({ _id: { $in: this.services } });
+      this.serviceNames = serviceDocs.map(s => s.name);
     } catch (err) {
-      console.error('Error fetching service name:', err);
+      console.error('Error fetching service names:', err);
     }
   }
-  
+
   // Update status based on usage and expiry
   if (!this.isTemplate) {
     const isExpired = this.isExpired();
     const isSessionsExhausted = this.isSessionsExhausted();
-    
     if (isExpired) {
       this.status = 'Expired';
     } else if (isSessionsExhausted) {
@@ -197,7 +192,6 @@ membershipSchema.pre('save', async function(next) {
       this.status = 'Active';
     }
   }
-  
   next();
 });
 

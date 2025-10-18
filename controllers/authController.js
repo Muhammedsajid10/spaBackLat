@@ -157,7 +157,7 @@ async function sendMembershipNotificationEmail(clientEmail, clientName, membersh
 
   const {
     membershipName,
-    serviceName,
+    serviceNames,
     numberOfSessions,
     validityPeriod,
     validityUnit,
@@ -206,8 +206,8 @@ async function sendMembershipNotificationEmail(clientEmail, clientName, membersh
             
             <div style="display: grid; gap: 15px;">
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #e2e8f0;">
-                <span style="color: #666; font-weight: 500;">Service:</span>
-                <span style="color: #333; font-weight: 600;">${serviceName}</span>
+                <span style="color: #666; font-weight: 500;">Services:</span>
+                <span style="color: #333; font-weight: 600;">${Array.isArray(serviceNames) ? serviceNames.join(', ') : serviceNames}</span>
               </div>
               
               <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #e2e8f0;">
