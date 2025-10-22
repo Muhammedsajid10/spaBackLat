@@ -8,16 +8,19 @@ const bookingSchema = new mongoose.Schema({
     trim: true
   },
   client: {
-    type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and String
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
     required: [true, 'Client is required']
   },
   services: [{
     service: {
-      type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and String
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Service',
       required: [true, 'Service is required']
     },
     employee: {
-      type: mongoose.Schema.Types.Mixed, // Allow both ObjectId and String
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Employee',
       required: [true, 'Employee is required']
     },
     price: {
@@ -327,6 +330,9 @@ bookingSchema.pre('save', function(next) {
 });
 
 // Populate related data when querying - handle both ObjectIds and strings
+// DISABLED: Auto-population middleware causing issues with legacy data
+// We now manually populate in controllers to handle invalid ObjectIds gracefully
+/*
 bookingSchema.pre(/^find/, function(next) {
   // Only populate if the field is an ObjectId, skip if it's a string
   this.populate({
@@ -354,6 +360,7 @@ bookingSchema.pre(/^find/, function(next) {
   });
   next();
 });
+*/
 
 module.exports = mongoose.model('Booking', bookingSchema);
 

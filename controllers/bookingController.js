@@ -528,6 +528,13 @@ const createBooking = async (req, res) => {
       if (!serviceDoc) {
         return res.status(404).json({ success: false, message: `Service not found: ${serviceId}` });
       }
+      
+      console.log(`🔍 Processing service ${serviceDoc.name}:`, {
+        rawStartTime: raw.startTime,
+        rawEndTime: raw.endTime,
+        rawEmployee: raw.employee
+      });
+      
       // Determine start/end times (use provided or default sequential based on provided)
       let startTime = raw.startTime ? new Date(raw.startTime) : new Date(apptDateObj);
       if (isNaN(startTime.getTime())) startTime = new Date(apptDateObj);
@@ -536,6 +543,11 @@ const createBooking = async (req, res) => {
       if (endTime <= startTime) {
         endTime = new Date(startTime.getTime() + serviceDoc.duration * 60000);
       }
+
+      console.log(`✅ Calculated times:`, {
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString()
+      });
 
       let employeeId = raw.employee || raw.employeeId; // expected field from frontend
       if (!employeeId || employeeId === 'any') {
@@ -560,11 +572,15 @@ const createBooking = async (req, res) => {
         // Overlap check for this employee
         const existingRanges = bookingsByEmployee.get(String(employeeId)) || [];
         console.log(`🔍 Checking conflicts for employee ${employeeId}:`);
-        console.log(`   New booking: ${startTime} - ${endTime}`);
-        console.log(`   Existing ranges:`, existingRanges.map(r => `${r.start} - ${r.end}`));
+        console.log(`   New booking: ${startTime.toISOString()} - ${endTime.toISOString()}`);
+        console.log(`   Existing bookings (${existingRanges.length}):`, existingRanges.map(r => ({
+          start: r.start.toISOString(),
+          end: r.end.toISOString()
+        })));
         
         if (overlaps(existingRanges, startTime, endTime)) {
           console.log(`❌ CONFLICT DETECTED for employee ${employeeId}`);
+          console.log(`   Conflicting time range: ${startTime.toISOString()} to ${endTime.toISOString()}`);
           return res.status(409).json({ success: false, message: `Employee has a conflicting booking for service '${serviceDoc.name}'.` });
         }
         console.log(`✅ No conflict for employee ${employeeId}`);
@@ -574,7 +590,7 @@ const createBooking = async (req, res) => {
 
       transformedServices.push({
         service: serviceDoc._id,
-        employee: employeeId,
+        employee: new mongoose.Types.ObjectId(employeeId), // Convert string to ObjectId for proper population
         price: serviceDoc.price,
         duration: serviceDoc.duration,
         startTime,
@@ -1090,12 +1106,18 @@ const completeBooking = async (req, res) => {
 // ADMIN BOOKING CONTROLLERS
 // ========================================
 
-// Get all bookings (admin only)
+// Get all bookings (admin only) - WITH PAGINATION
 const getAllBookings = async (req, res) => {
+  console.log('🚀 UPDATED CODE LOADED - VERSION 2024-10-22-v3');
   try {
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, page = 1, limit = 50 } = req.query;
     
-    console.log('📅 Date filter params received:', { startDate, endDate });
+    // Convert pagination params to numbers
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(1000, Math.max(1, parseInt(limit))); // Max 1000 per page
+    const skip = (pageNum - 1) * limitNum;
+    
+    console.log('📅 Request params:', { startDate, endDate, page: pageNum, limit: limitNum, skip });
     
     // Build the query filter - TIMEZONE FIX: Use simple date comparison
     let dateFilter = {};
@@ -1108,239 +1130,310 @@ const getAllBookings = async (req, res) => {
         // Parse as UTC to avoid timezone conversion
         const startDateObj = new Date(`${startDate}T00:00:00.000Z`);
         dateFilter['appointmentDate'].$gte = startDateObj;
-        // console.log('🔍 Filtering bookings from:', startDateObj.toISOString());
       }
       
       if (endDate) {
         // Parse as UTC and set to end of day
         const endDateObj = new Date(`${endDate}T23:59:59.999Z`);
         dateFilter['appointmentDate'].$lte = endDateObj;
-        // console.log('🔍 Filtering bookings until:', endDateObj.toISOString());
       }
     }
     
-    console.log('📋 Final date filter applied:', JSON.stringify(dateFilter, null, 2));
+    console.log('📋 Filter applied:', JSON.stringify(dateFilter, null, 2));
     
-    // Fetch bookings with conditional population for mixed data types
+    // Get total count for pagination (fast with indexes)
+    const totalCount = await Booking.countDocuments(dateFilter);
+    console.log(`📊 Total bookings: ${totalCount}`);
+    
+    // Fetch bookings with pagination - OPTIMIZED
+    // Use lean() FIRST to get raw data, then we'll manually populate to avoid cast errors
     const bookings = await Booking.find(dateFilter)
-      .lean() // Use lean for better performance
-      .sort({ appointmentDate: -1 });
+      .lean() // Use lean for better performance and to avoid auto-population errors
+      .sort({ appointmentDate: -1 })
+      .skip(skip)
+      .limit(limitNum);
 
-    console.log(`🔍 Raw bookings found: ${bookings.length}`);
-    if (bookings.length > 0) {
-      console.log('📝 Sample raw booking:', JSON.stringify(bookings[0], null, 2));
+    console.log(`🔍 Fetched ${bookings.length} bookings with pagination (raw data, will populate manually)`);
+    
+    // Collect all unpopulated IDs upfront for batch fetching
+    const unpopulatedClientIds = new Set();
+    const unpopulatedServiceIds = new Set();
+    const unpopulatedEmployeeIds = new Set();
+
+    bookings.forEach(booking => {
+      // Helper function to validate and add ObjectId with try-catch
+      const isValidObjectId = (id) => {
+        const idStr = String(id);
+        // Must be exactly 24 hex characters
+        if (idStr.length !== 24) return false;
+        if (!/^[0-9a-fA-F]{24}$/.test(idStr)) return false;
+        
+        // Try to actually create an ObjectId - this is the safest check
+        try {
+          new mongoose.Types.ObjectId(idStr);
+          return true;
+        } catch (e) {
+          return false;
+        }
+      };
+      
+      // Check client - only add if it's a valid ObjectId
+      if (booking.client && typeof booking.client !== 'object') {
+        const clientId = String(booking.client);
+        if (isValidObjectId(clientId)) {
+          unpopulatedClientIds.add(clientId);
+        } else {
+          console.log(`⚠️ Skipping invalid client ID: "${clientId}"`);
+        }
+      } else if (booking.client && typeof booking.client === 'object' && !booking.client.firstName) {
+        const clientId = String(booking.client._id || booking.client);
+        if (isValidObjectId(clientId)) {
+          unpopulatedClientIds.add(clientId);
+        } else {
+          console.log(`⚠️ Skipping invalid client ID from object: "${clientId}"`);
+        }
+      }
+
+      // Check services - only add if valid ObjectId
+      if (booking.services) {
+        booking.services.forEach(service => {
+          if (service.service && typeof service.service !== 'object') {
+            const serviceId = String(service.service);
+            if (isValidObjectId(serviceId)) {
+              unpopulatedServiceIds.add(serviceId);
+            }
+          } else if (service.service && typeof service.service === 'object' && !service.service.name) {
+            const serviceId = String(service.service._id || service.service);
+            if (isValidObjectId(serviceId)) {
+              unpopulatedServiceIds.add(serviceId);
+            }
+          }
+
+          if (service.employee && typeof service.employee !== 'object') {
+            const employeeId = String(service.employee);
+            if (isValidObjectId(employeeId)) {
+              unpopulatedEmployeeIds.add(employeeId);
+            }
+          } else if (service.employee && typeof service.employee === 'object' && !service.employee.user) {
+            const employeeId = String(service.employee._id || service.employee);
+            if (isValidObjectId(employeeId)) {
+              unpopulatedEmployeeIds.add(employeeId);
+            }
+          }
+        });
+      }
+    });
+
+    console.log(`✅ Validation complete. Collected valid IDs: ${unpopulatedClientIds.size} clients, ${unpopulatedServiceIds.size} services, ${unpopulatedEmployeeIds.size} employees`);
+
+    // DEBUG: Log the actual IDs being used
+    if (unpopulatedClientIds.size > 0) {
+      console.log('📋 Client IDs to fetch:', Array.from(unpopulatedClientIds).slice(0, 5));
     }
 
-    // Manual population for mixed data types
-    const User = require('../models/User');
-    const Service = require('../models/Service');
-    const Employee = require('../models/Employee');
-
-    // Process each booking to normalize mixed data types for calendar consistency
-    const processedBookings = await Promise.all(bookings.map(async (booking) => {
-      // Normalize client data
-      console.log(`🔍 Client debug - Type: ${typeof booking.client}, Value: ${booking.client}, IsObjectId: ${mongoose.Types.ObjectId.isValid(booking.client)}`);
+    // Batch fetch all unpopulated data
+    console.log(`📦 Batch fetching: ${unpopulatedClientIds.size} clients, ${unpopulatedServiceIds.size} services, ${unpopulatedEmployeeIds.size} employees`);
+    
+    let clientsMap = new Map();
+    let servicesMap = new Map();
+    let employeesMap = new Map();
+    
+    try {
+      // Fetch clients
+      if (unpopulatedClientIds.size > 0) {
+        console.log('📦 Fetching clients...');
+        const clientDocs = await User.find({ _id: { $in: Array.from(unpopulatedClientIds) } })
+          .select('firstName lastName email')
+          .lean();
+        clientsMap = new Map(clientDocs.map(d => [String(d._id), d]));
+        console.log(`✅ Fetched ${clientsMap.size} clients`);
+      }
       
-      if (typeof booking.client === 'object' && booking.client !== null && booking.client._id) {
-        // Already a populated object, ensure it has the fullName property
-        if (booking.client.firstName || booking.client.lastName) {
-          booking.client.fullName = `${booking.client.firstName || ''} ${booking.client.lastName || ''}`.trim() || 'Unknown Client';
-        } else {
-          // Object but no name fields, might need to populate
-          try {
-            const clientData = await User.findById(booking.client._id).select('firstName lastName email').lean();
-            if (clientData) {
-              booking.client = {
-                _id: clientData._id,
-                firstName: clientData.firstName,
-                lastName: clientData.lastName,
-                email: clientData.email,
-                fullName: `${clientData.firstName} ${clientData.lastName}`.trim()
-              };
-            }
-          } catch (err) {
-            console.log('Failed to populate client object:', err.message);
-            booking.client.fullName = booking.client._id.toString();
-          }
-        }
-      } else if (mongoose.Types.ObjectId.isValid(booking.client) && typeof booking.client !== 'object') {
-        // For ObjectId clients (string or ObjectId), populate the data
-        try {
-          const clientData = await User.findById(booking.client).select('firstName lastName email').lean();
-          if (clientData) {
-            booking.client = {
-              _id: clientData._id,
-              firstName: clientData.firstName,
-              lastName: clientData.lastName,
-              email: clientData.email,
-              fullName: `${clientData.firstName} ${clientData.lastName}`.trim()
-            };
-          }
-        } catch (err) {
-          // Fallback if population fails
+      // Fetch services
+      if (unpopulatedServiceIds.size > 0) {
+        console.log('📦 Fetching services...');
+        const serviceDocs = await Service.find({ _id: { $in: Array.from(unpopulatedServiceIds) } })
+          .select('name price duration')
+          .lean();
+        servicesMap = new Map(serviceDocs.map(d => [String(d._id), d]));
+        console.log(`✅ Fetched ${servicesMap.size} services`);
+      }
+      
+      // Fetch employees
+      if (unpopulatedEmployeeIds.size > 0) {
+        console.log('📦 Fetching employees...');
+        const employeeDocs = await Employee.find({ _id: { $in: Array.from(unpopulatedEmployeeIds) } })
+          .populate('user', 'firstName lastName email')
+          .lean();
+        employeesMap = new Map(employeeDocs.map(d => [String(d._id), d]));
+        console.log(`✅ Fetched ${employeesMap.size} employees`);
+      }
+      
+      console.log(`✅ Batch fetch complete: ${clientsMap.size} clients, ${servicesMap.size} services, ${employeesMap.size} employees loaded`);
+    } catch (batchError) {
+      console.error('❌ Error during batch fetch:', batchError);
+      console.error('Stack:', batchError.stack);
+      // Continue with empty maps - better to show some data than crash
+    }
+    
+    // Process bookings using the fetched data maps
+    const processedBookings = bookings.map((booking, index) => {
+      try {
+      // Normalize client data
+      if (booking.client && typeof booking.client === 'object' && booking.client.firstName !== undefined) {
+        // Client is properly populated
+        booking.client = {
+          _id: booking.client._id,
+          firstName: booking.client.firstName || '',
+          lastName: booking.client.lastName || '',
+          email: booking.client.email || '',
+          fullName: `${booking.client.firstName || ''} ${booking.client.lastName || ''}`.trim() || 'Unknown Client'
+        };
+      } else {
+        // Look up in batch-fetched map
+        const clientId = String(booking.client?._id || booking.client);
+        const clientDoc = clientsMap.get(clientId);
+        if (clientDoc) {
           booking.client = {
-            _id: booking.client,
-            firstName: 'Unknown',
+            _id: clientDoc._id,
+            firstName: clientDoc.firstName || '',
+            lastName: clientDoc.lastName || '',
+            email: clientDoc.email || '',
+            fullName: `${clientDoc.firstName || ''} ${clientDoc.lastName || ''}`.trim() || 'Unknown Client'
+          };
+        } else {
+          // Use original client value as firstName if it's a string (legacy data)
+          const originalClientValue = String(booking.client || 'Unknown');
+          booking.client = {
+            _id: '000000000000000000000000', // Placeholder ObjectId for invalid data
+            firstName: originalClientValue.length < 50 ? originalClientValue : 'Unknown',
             lastName: 'Client',
             email: '',
-            fullName: 'Unknown Client'
+            fullName: originalClientValue.length < 50 ? originalClientValue : 'Unknown Client'
           };
         }
-      } else if (typeof booking.client === 'string') {
-        // For string clients (Python-created non-ObjectId)
-        booking.client = {
-          _id: null,
-          firstName: booking.client,
-          lastName: '',
-          email: '',
-          fullName: booking.client
-        };
-      } else if (typeof booking.client === 'object' && booking.client !== null) {
-        // Already populated object, just ensure fullName exists
-        booking.client.fullName = `${booking.client.firstName || ''} ${booking.client.lastName || ''}`.trim() || 'Unknown Client';
-      } else {
-        // Catch-all for any other format
-        console.log(`⚠️ Unexpected client format:`, booking.client);
-        booking.client = {
-          _id: booking.client,
-          firstName: 'Unknown',
-          lastName: 'Client',
-          email: '',
-          fullName: booking.client ? booking.client.toString() : 'Unknown Client'
-        };
       }
 
-      // Normalize services data
+      // Normalize services data using batch-fetched maps
       if (booking.services) {
-        booking.services = await Promise.all(booking.services.map(async (service) => {
-          // Normalize service data
-          if (typeof service.service === 'string') {
-            // For string services (Python-created)
+        booking.services = booking.services.map((service) => {
+          // Normalize service
+          if (service.service && typeof service.service === 'object' && service.service.name) {
+            // Already populated
             service.service = {
-              _id: null,
-              name: service.service,
-              price: service.price || 0
+              _id: service.service._id,
+              name: service.service.name || 'Unknown Service',
+              price: service.service.price || service.price || 0,
+              duration: service.service.duration || service.duration || 0
             };
-          } else if (mongoose.Types.ObjectId.isValid(service.service)) {
-            // For ObjectId services, populate the data
-            try {
-              const serviceData = await Service.findById(service.service).select('name price').lean();
-              if (serviceData) {
-                service.service = {
-                  _id: serviceData._id,
-                  name: serviceData.name,
-                  price: serviceData.price
-                };
-              }
-            } catch (err) {
-              // Fallback if population fails
+          } else {
+            // Look up in batch-fetched map
+            const serviceId = String(service.service?._id || service.service);
+            const serviceDoc = servicesMap.get(serviceId);
+            if (serviceDoc) {
               service.service = {
-                _id: service.service,
-                name: 'Unknown Service',
-                price: service.price || 0
+                _id: serviceDoc._id,
+                name: serviceDoc.name || 'Unknown Service',
+                price: serviceDoc.price || service.price || 0,
+                duration: serviceDoc.duration || service.duration || 0
+              };
+            } else {
+              // Use original service value as name if it's a string (legacy data)
+              const originalServiceValue = String(service.service || 'Unknown');
+              service.service = {
+                _id: '000000000000000000000000', // Placeholder ObjectId
+                name: originalServiceValue.length < 100 ? originalServiceValue : 'Unknown Service',
+                price: service.price || 0,
+                duration: service.duration || 0
               };
             }
           }
 
-          // Normalize employee data
-          console.log(`🔍 Employee debug - Type: ${typeof service.employee}, Value: ${service.employee}, IsObjectId: ${mongoose.Types.ObjectId.isValid(service.employee)}`);
-          
-          if (mongoose.Types.ObjectId.isValid(service.employee) && typeof service.employee !== 'object') {
-            // For ObjectId employees (string or ObjectId), populate the data
-            try {
-              const employeeData = await Employee.findById(service.employee)
-                .populate('user', 'firstName lastName email')
-                .select('employeeId user')
-                .lean();
-              if (employeeData && employeeData.user) {
-                service.employee = {
-                  _id: employeeData._id,
-                  employeeId: employeeData.employeeId,
-                  fullName: `${employeeData.user.firstName} ${employeeData.user.lastName}`.trim(),
-                  user: employeeData.user
-                };
-              }
-            } catch (err) {
-              // Fallback if population fails
+          // Normalize employee
+          if (service.employee && typeof service.employee === 'object' && service.employee.user) {
+            // Already populated with user
+            service.employee.fullName = `${service.employee.user.firstName || ''} ${service.employee.user.lastName || ''}`.trim() || 'Unknown Employee';
+          } else {
+            // Look up in batch-fetched map
+            const employeeId = String(service.employee?._id || service.employee);
+            const employeeDoc = employeesMap.get(employeeId);
+            if (employeeDoc && employeeDoc.user) {
               service.employee = {
-                _id: service.employee,
-                employeeId: 'Unknown',
-                fullName: 'Unknown Employee',
+                _id: employeeDoc._id,
+                employeeId: employeeDoc.employeeId,
+                fullName: `${employeeDoc.user.firstName || ''} ${employeeDoc.user.lastName || ''}`.trim() || 'Unknown Employee',
                 user: {
-                  firstName: 'Unknown',
+                  firstName: employeeDoc.user.firstName || '',
+                  lastName: employeeDoc.user.lastName || '',
+                  email: employeeDoc.user.email || ''
+                }
+              };
+            } else {
+              // Use original employee value as name if it's a string (legacy data)
+              const originalEmployeeValue = String(service.employee || 'Unknown');
+              service.employee = {
+                _id: '000000000000000000000000', // Placeholder ObjectId
+                employeeId: null,
+                fullName: originalEmployeeValue.length < 100 ? originalEmployeeValue : 'Unknown Employee',
+                user: {
+                  firstName: originalEmployeeValue.length < 100 ? originalEmployeeValue : 'Unknown',
                   lastName: 'Employee',
                   email: ''
                 }
               };
             }
-          } else if (typeof service.employee === 'string') {
-            // For string employees (Python-created non-ObjectId)
-            service.employee = {
-              _id: null,
-              employeeId: null,
-              fullName: service.employee,
-              user: {
-                firstName: service.employee,
-                lastName: '',
-                email: ''
-              }
-            };
-          } else if (typeof service.employee === 'object' && service.employee !== null) {
-            // Already populated object, ensure fullName exists
-            if (service.employee.user) {
-              service.employee.fullName = `${service.employee.user.firstName || ''} ${service.employee.user.lastName || ''}`.trim() || 'Unknown Employee';
-            }
-          } else {
-            // Catch-all for any other format
-            console.log(`⚠️ Unexpected employee format:`, service.employee);
-            service.employee = {
-              _id: service.employee,
-              employeeId: 'Unknown',
-              fullName: service.employee ? service.employee.toString() : 'Unknown Employee',
-              user: {
-                firstName: 'Unknown',
-                lastName: 'Employee',
-                email: ''
-              }
-            };
           }
 
           return service;
-        }));
+        });
       }
 
       return booking;
-    }));
+      } catch (processingError) {
+        console.error(`❌ Error processing booking at index ${index}:`, processingError);
+        console.error('Booking data:', booking);
+        // Return the booking with minimal data to avoid breaking the entire response
+        return {
+          ...booking,
+          client: booking.client || { fullName: 'Error Loading Client' },
+          services: booking.services || []
+        };
+      }
+    });
 
     console.log(`✅ Processed bookings: ${processedBookings.length}`);
     if (processedBookings.length > 0) {
       console.log('📝 Sample processed booking:', JSON.stringify(processedBookings[0], null, 2));
     }
     
-    // Debug: Log the date ranges of found bookings
-    if (processedBookings.length > 0) {
-      processedBookings.forEach((booking, index) => {
-        const appointmentDate = new Date(booking.appointmentDate);
-        // console.log(`📝 Booking ${index + 1}: Appointment date ${appointmentDate.toISOString().split('T')[0]}`);
-        booking.services.forEach((service, serviceIndex) => {
-          if (service.startTime) {
-            const serviceDate = new Date(service.startTime);
-            console.log(`   Service ${serviceIndex + 1}: ${serviceDate.toISOString()}`);
-          }
-        });
-      });
-    }
+    // Calculate pagination metadata
+    const totalPages = Math.ceil(totalCount / limitNum);
+    const pagination = {
+      page: pageNum,
+      limit: limitNum,
+      total: totalCount,
+      pages: totalPages,
+      hasNextPage: pageNum < totalPages,
+      hasPrevPage: pageNum > 1
+    };
+    
+    console.log('📊 Pagination:', pagination);
 
     res.json({
       success: true,
       results: processedBookings.length,
-      data: { bookings: processedBookings }
+      data: { 
+        bookings: processedBookings,
+        pagination 
+      }
     });
   } catch (error) {
-    console.error('Error fetching all bookings:', error);
+    console.error('❌ Error fetching all bookings:', error);
+    console.error('❌ Stack trace:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch bookings'
+      message: 'Failed to fetch bookings',
+      error: error.message
     });
   }
 };
