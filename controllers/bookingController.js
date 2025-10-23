@@ -1553,6 +1553,8 @@ const updateServiceStatus = async (req, res) => {
     
     // Determine overall booking status based on service statuses
     // Map service-level statuses to valid booking-level statuses
+    const previousBookingStatus = booking.status;
+    
     if (serviceCounts.completed === totalServices) {
       // All services completed
       booking.status = 'completed';
@@ -1582,6 +1584,23 @@ const updateServiceStatus = async (req, res) => {
     // console.log(`📊 Booking ${booking._id} status updated to: ${booking.status} (based on service statuses)`);
 
     await booking.save();
+
+    // 🔄 Update payment status when booking is completed
+    if (booking.status === 'completed' && previousBookingStatus !== 'completed') {
+      try {
+        const Payment = require('../models/Payment');
+        const payment = await Payment.findOne({ booking: booking._id });
+        
+        if (payment && payment.status !== 'completed' && payment.status !== 'refunded') {
+          console.log(`💳 Updating payment status to 'completed' for booking ${booking._id}`);
+          payment.status = 'completed';
+          await payment.save();
+        }
+      } catch (paymentErr) {
+        console.error('⚠️ Failed to update payment status:', paymentErr);
+        // Don't fail the whole operation if payment update fails
+      }
+    }
 
     // If all services now no-show and booking was giftcard, auto-forfeit
     if (serviceStatus === 'no-show') {
