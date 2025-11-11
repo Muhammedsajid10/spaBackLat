@@ -19,8 +19,16 @@ const userSchema = new mongoose.Schema({
     type: String,
     // required: [true, 'Email is required'],
     unique: true,
+    sparse: true, // Allow multiple null/undefined values for unique constraint
     lowercase: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
+    validate: {
+      validator: function(v) {
+        // Allow empty/null emails, but validate format if provided
+        if (!v || v.trim() === '') return true;
+        return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
+      },
+      message: 'Please enter a valid email'
+    }
   },
   password: {
     type: String,
@@ -34,7 +42,14 @@ const userSchema = new mongoose.Schema({
   phone: {
     type: String,
     // required: [true, 'Phone number is required'],
-    match: [/^[\+]?[1-9][\d]{0,15}$/, 'Please enter a valid phone number']
+    validate: {
+      validator: function(v) {
+        // Allow empty/null phone numbers, but validate format if provided
+        if (!v || v.trim() === '') return true;
+        return /^[\+]?[1-9][\d]{0,15}$/.test(v);
+      },
+      message: 'Please enter a valid phone number'
+    }
   },
   dateOfBirth: {
     type: Date

@@ -3,7 +3,7 @@ const adminController = require('../controllers/adminController');
 const clientController = require('../controllers/clientController');
 const { protect } = require('../middleware/authMiddleware');
 const { isAdmin, isStaff, logUserAction } = require('../middleware/roleMiddleware');
-const { getCashMovementSummary } = require('../controllers/paymentController');
+const { getCashMovementSummary, getDailyTransactionSummary } = require('../controllers/paymentController');
 
 const router = express.Router();
 
@@ -26,6 +26,9 @@ router.get('/attendance', isStaff, adminController.getAllAttendance);
 
 // Cash Movement Summary
 router.get('/cash-movement-summary', isStaff, getCashMovementSummary);
+
+// Daily Transaction Summary
+router.get('/daily-transaction-summary', isStaff, getDailyTransactionSummary);
 
 // Data export routes (admin only)
 router.get('/export', isAdmin, adminController.exportData);

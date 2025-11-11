@@ -822,45 +822,80 @@ const createBooking = async (req, res) => {
       }
     }
 
-    // If gift card payment: redeem / deduct immediately so card cannot be re-used
-    if (paymentMethod === 'giftcard') {
+    // Handle gift card redemption - can be used alone or combined with other payment methods
+    // Check both paymentMethod === 'giftcard' (full payment) and paymentDetails.giftCard (partial payment)
+    const hasGiftCardPayment = paymentMethod === 'giftcard' || 
+                               (newBooking.paymentDetails?.giftCard?.giftCardId) ||
+                               giftCardCode;
+    
+    if (hasGiftCardPayment) {
       try {
         const GiftCard = require('../models/GiftCard');
         let gc = null;
-        if (newBooking.paymentDetails?.giftCardId) {
+        
+        // Try to find gift card by ID from payment details first
+        if (newBooking.paymentDetails?.giftCard?.giftCardId) {
+          gc = await GiftCard.findById(newBooking.paymentDetails.giftCard.giftCardId);
+          console.log('[BookingController] Gift card found by ID from paymentDetails.giftCard:', gc?.code);
+        } else if (newBooking.paymentDetails?.giftCardId) {
           gc = await GiftCard.findById(newBooking.paymentDetails.giftCardId);
+          console.log('[BookingController] Gift card found by ID from paymentDetails.giftCardId:', gc?.code);
         } else if (giftCardCode) {
           gc = await GiftCard.findOne({ code: giftCardCode.toUpperCase() });
+          console.log('[BookingController] Gift card found by code:', gc?.code);
           if (gc) {
             newBooking.paymentDetails = newBooking.paymentDetails || {};
             newBooking.paymentDetails.giftCardId = gc._id;
             await newBooking.save();
           }
         }
+        
         if (gc) {
-          console.log('[BookingController] Gift card found for redemption:', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue });
+          console.log('[BookingController] Gift card found for redemption:', { 
+            code: gc.code, 
+            status: gc.status, 
+            remainingValue: gc.remainingValue,
+            paymentMethod,
+            hasPaymentDetailsGiftCard: !!newBooking.paymentDetails?.giftCard
+          });
+          
           // Skip if already fully used/expired/cancelled
           if (["Used","Expired","Cancelled"].includes(gc.status) || gc.remainingValue <= 0) {
             console.warn('[BookingController] Gift card not usable (status or balance):', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue });
           } else {
-            // Recalculate safe redeem amount: if frontend sent redeemAmount use min of booking total
-            const requestedRedeem = Number(newBooking.paymentDetails?.redeemAmount) || 0;
+            // Get redeem amount from paymentDetails.giftCard.redeemAmount or paymentDetails.redeemAmount
+            const requestedRedeem = Number(newBooking.paymentDetails?.giftCard?.redeemAmount) || 
+                                   Number(newBooking.paymentDetails?.redeemAmount) || 
+                                   0;
             const maxAllowed = Math.min(gc.remainingValue, totalAmount);
-            const redeemAmount = Math.min(requestedRedeem || maxAllowed, maxAllowed);
-            console.log('[BookingController] Redeem amount calculation:', { requestedRedeem, maxAllowed, redeemAmount });
+            const redeemAmount = requestedRedeem > 0 ? Math.min(requestedRedeem, maxAllowed) : maxAllowed;
+            
+            console.log('[BookingController] Redeem amount calculation:', { 
+              requestedRedeem, 
+              maxAllowed, 
+              redeemAmount,
+              totalAmount,
+              gcRemainingValue: gc.remainingValue 
+            });
+            
             if (redeemAmount > 0) {
               const result = await gc.useGiftCard(redeemAmount, clientUser._id, newBooking._id, 'Redeemed at booking creation');
               console.log('[BookingController] Gift card redemption result:', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue, result });
+              
               // Reload gift card to verify status
               const reloadedGC = await GiftCard.findById(gc._id);
-              console.log('[BookingController] Gift card after redemption:', { code: reloadedGC.code, status: reloadedGC.status, remainingValue: reloadedGC.remainingValue });
+              console.log('[BookingController] Gift card after redemption:', { 
+                code: reloadedGC.code, 
+                status: reloadedGC.status, 
+                remainingValue: reloadedGC.remainingValue 
+              });
             }
           }
         } else {
-          console.warn('[BookingController] No gift card found for redemption.');
+          console.warn('[BookingController] No gift card found for redemption despite hasGiftCardPayment=true');
         }
       } catch (gcErr) {
-        console.error('[BookingController] Gift card redemption error (createBooking):', gcErr.message);
+        console.error('[BookingController] Gift card redemption error (createBooking):', gcErr.message, gcErr.stack);
       }
     }
 

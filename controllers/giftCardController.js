@@ -49,10 +49,16 @@ const getAllPurchasedGiftCards = async (req, res) => {
       .populate('usageHistory.usedBy', 'firstName lastName')
       .sort({ purchaseDate: -1 });
     
+    // Filter out fully used gift cards (remainingValue = 0) unless specifically requested
+    const filteredGiftCards = status ? giftCards : giftCards.filter(card => {
+      // Include cards that are active or partially used with remaining value
+      return card.remainingValue > 0 || card.status === 'Active';
+    });
+    
     res.status(200).json({
       success: true,
-      results: giftCards.length,
-      data: { giftCards }
+      results: filteredGiftCards.length,
+      data: { giftCards: filteredGiftCards }
     });
   } catch (err) {
     res.status(500).json({

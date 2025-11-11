@@ -703,8 +703,8 @@ const getCashMovementSummary = async (req, res) => {
       const method = item._id.paymentMethod;
       const status = item._id.status;
       if (!summary[method]) summary[method] = { paymentsCollected: 0, refundsPaid: 0 };
-      if (status === "completed") summary[method].paymentsCollected += item.total / 100;
-      if (status === "refunded") summary[method].refundsPaid += item.total / 100;
+      if (status === "completed") summary[method].paymentsCollected += item.total;
+      if (status === "refunded") summary[method].refundsPaid += item.total;
     });
 
     res.json({ success: true, data: summary, date: date });
@@ -823,6 +823,106 @@ const fixPendingPaymentStatus = catchAsync(async (req, res, next) => {
   }
 });
 
+// Get daily transaction summary - Services, Gift Cards, Memberships
+const getDailyTransactionSummary = async (req, res) => {
+  let { date } = req.query; // Expecting YYYY-MM-DD
+  
+  // If no date provided, use today's date
+  if (!date) {
+    date = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+  }
+  
+  // Validate date format
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Date must be in YYYY-MM-DD format' 
+    });
+  }
+  
+  const start = new Date(date + 'T00:00:00.000Z');
+  const end = new Date(date + 'T23:59:59.999Z');
+
+  try {
+    const GiftCard = require('../models/GiftCard');
+    const Membership = require('../models/Membership');
+
+    // Get service bookings for the day
+    const bookings = await Booking.find({
+      createdAt: { $gte: start, $lte: end }
+    }).select('status finalAmount services');
+
+    // Calculate services sales and refunds
+    let servicesSalesQty = 0;
+    let servicesRefundQty = 0;
+    let servicesGrossTotal = 0;
+
+    bookings.forEach(booking => {
+      if (booking.status === 'completed' || booking.status === 'confirmed') {
+        servicesSalesQty += booking.services?.length || 0;
+        servicesGrossTotal += booking.finalAmount || 0;
+      } else if (booking.status === 'cancelled') {
+        servicesRefundQty += booking.services?.length || 0;
+      }
+    });
+
+    // Get gift cards purchased for the day (using createdAt instead of purchaseDate)
+    const giftCards = await GiftCard.find({
+      createdAt: { $gte: start, $lte: end },
+      isTemplate: false // Only count purchased gift cards, not templates
+    }).select('status value purchasePrice');
+
+    const giftCardSalesQty = giftCards.filter(gc => 
+      gc.status === 'Active' || gc.status === 'Used' || gc.status === 'Partially Used'
+    ).length;
+    const giftCardRefundQty = giftCards.filter(gc => gc.status === 'Cancelled').length;
+    const giftCardGrossTotal = giftCards
+      .filter(gc => gc.status === 'Active' || gc.status === 'Used' || gc.status === 'Partially Used')
+      .reduce((sum, gc) => sum + (gc.purchasePrice || gc.value || 0), 0);
+
+    // Get memberships purchased for the day (using createdAt and excluding templates)
+    const memberships = await Membership.find({
+      createdAt: { $gte: start, $lte: end },
+      isTemplate: false // Only count purchased memberships, not templates
+    }).select('status price');
+
+    const membershipSalesQty = memberships.filter(m => 
+      m.status === 'Active' || m.status === 'Partially Used' || m.status === 'Used'
+    ).length;
+    const membershipRefundQty = memberships.filter(m => m.status === 'Cancelled').length;
+    const membershipGrossTotal = memberships
+      .filter(m => m.status === 'Active' || m.status === 'Partially Used' || m.status === 'Used')
+      .reduce((sum, m) => sum + (m.price || 0), 0);
+
+    const summary = {
+      'Services': {
+        salesQty: servicesSalesQty,
+        refundQty: servicesRefundQty,
+        grossTotal: servicesGrossTotal
+      },
+      'Gift cards': {
+        salesQty: giftCardSalesQty,
+        refundQty: giftCardRefundQty,
+        grossTotal: giftCardGrossTotal
+      },
+      'Membership card': {
+        salesQty: membershipSalesQty,
+        refundQty: membershipRefundQty,
+        grossTotal: membershipGrossTotal
+      }
+    };
+
+    res.json({ success: true, data: summary, date: date });
+  } catch (err) {
+    console.error('Daily transaction summary error:', err);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch daily transaction summary', 
+      error: err.message 
+    });
+  }
+};
+
 module.exports = {
   createPayment,
   confirmPayment,
@@ -838,5 +938,6 @@ module.exports = {
   paymentCancel,
   getCashMovementSummary,
   getAllPayments,
-  fixPendingPaymentStatus
+  fixPendingPaymentStatus,
+  getDailyTransactionSummary
 }; 

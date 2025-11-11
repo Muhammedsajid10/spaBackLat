@@ -103,7 +103,7 @@ class EmailService {
         <div class="content">
           <p>Dear ${booking.client.firstName} ${booking.client.lastName},</p>
           
-          <p>Your booking has been confirmed and payment has been processed successfully. We look forward to providing you with an exceptional spa experience!</p>
+          <p>Your booking has been confirmed . We look forward to providing you with an exceptional spa experience!</p>
           
           <div class="booking-details">
             <h3>Booking Details</h3>
@@ -146,7 +146,7 @@ class EmailService {
               <tbody>
                 ${servicesList}
                 <tr class="total-row">
-                  <td style="padding: 15px;"><strong>Total Amount Paid</strong></td>
+                  <td style="padding: 15px;"><strong>Total Amount</strong></td>
                   <td style="padding: 15px;"><strong>AED ${fmt(paymentAmountAED !== undefined ? paymentAmountAED : booking.totalAmount)}</strong></td>
                   <td style="padding: 15px;"></td>
                 </tr>
