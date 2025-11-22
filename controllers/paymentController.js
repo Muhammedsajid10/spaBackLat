@@ -686,13 +686,14 @@ const getCashMovementSummary = async (req, res) => {
   const end = new Date(date + 'T23:59:59.999Z');
 
   try {
-    // Aggregate payments by paymentMethod and status
+    // Aggregate payments by paymentMethod and status with count
     const payments = await Payment.aggregate([
       { $match: { createdAt: { $gte: start, $lte: end } } },
       {
         $group: {
           _id: { paymentMethod: "$paymentMethod", status: "$status" },
-          total: { $sum: "$amount" }
+          total: { $sum: "$amount" },
+          count: { $sum: 1 }
         }
       }
     ]);
@@ -702,9 +703,15 @@ const getCashMovementSummary = async (req, res) => {
     payments.forEach(item => {
       const method = item._id.paymentMethod;
       const status = item._id.status;
-      if (!summary[method]) summary[method] = { paymentsCollected: 0, refundsPaid: 0 };
-      if (status === "completed") summary[method].paymentsCollected += item.total;
-      if (status === "refunded") summary[method].refundsPaid += item.total;
+      if (!summary[method]) summary[method] = { paymentsCollected: 0, refundsPaid: 0, paymentsCount: 0, refundsCount: 0 };
+      if (status === "completed") {
+        summary[method].paymentsCollected += item.total;
+        summary[method].paymentsCount += item.count;
+      }
+      if (status === "refunded") {
+        summary[method].refundsPaid += item.total;
+        summary[method].refundsCount += item.count;
+      }
     });
 
     res.json({ success: true, data: summary, date: date });

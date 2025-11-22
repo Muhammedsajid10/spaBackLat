@@ -334,14 +334,16 @@ const createBookingConfirmation = async (req, res) => {
 // Create booking (supports multiple services & professionals + gift card / membership payment)
 const createBooking = async (req, res) => {
   try {
-    console.log('='.repeat(80));
-    console.log('🎯 CREATE BOOKING REQUEST RECEIVED');
-    console.log('='.repeat(80));
+    console.log('\n\n');
+    console.log('🎯'.repeat(40));
+    console.log('🎯 CREATE BOOKING REQUEST RECEIVED - TIMESTAMP:', new Date().toISOString());
+    console.log('🎯'.repeat(40));
     console.log('🔍 FULL REQUEST BODY RECEIVED:', JSON.stringify(req.body, null, 2));
     console.log('🔍 Request method:', req.method);
     console.log('🔍 Request path:', req.path);
     console.log('🔍 Request headers:', JSON.stringify(req.headers, null, 2));
-    console.log('='.repeat(80));
+    console.log('🎯'.repeat(40));
+    console.log('\n\n');
     
   let { 
     services: incomingServices, 
@@ -935,38 +937,75 @@ const createBooking = async (req, res) => {
     }
 
     // CREATE PAYMENT RECORD FOR THIS BOOKING
+    console.log('='.repeat(80));
+    console.log('💳 CREATING PAYMENT RECORD');
+    console.log('='.repeat(80));
     try {
       const Payment = require('../models/Payment');
+      
+      // Determine payment gateway based on payment method
+      // Payment model only accepts: stripe, paypal, square, adyen, payu, 2c2p, mercadopago, razorpay
+      let gateway = 'stripe'; // Default gateway for card payments
+      if (paymentMethod === 'cash' || paymentMethod === 'giftcard' || paymentMethod === 'membership') {
+        gateway = 'square'; // Use square for manual/offline payments
+      }
+      
+      // Prepare metadata as Map of strings only (Payment model requirement)
+      const metadata = new Map();
+      metadata.set('bookingNumber', newBooking.bookingNumber);
+      metadata.set('bookingId', newBooking._id.toString());
+      metadata.set('totalServices', newBooking.services.length.toString());
+      metadata.set('totalDuration', newBooking.totalDuration.toString());
+      
+      // Add first service details (metadata must be string values)
+      if (newBooking.services.length > 0) {
+        const firstService = newBooking.services[0];
+        metadata.set('primaryService', firstService.serviceName || 'Unknown Service');
+        metadata.set('primaryServicePrice', (firstService.price || 0).toString());
+      }
+      
+      console.log('💳 Payment record data:', {
+        user: clientUser._id,
+        booking: newBooking._id,
+        amount: newBooking.finalAmount || totalAmount,
+        currency: 'AED',
+        paymentMethod: paymentMethod || 'cash',
+        paymentGateway: gateway,
+        bookingNumber: newBooking.bookingNumber
+      });
       
       const paymentRecord = new Payment({
         user: clientUser._id,
         booking: newBooking._id,
-        amount: totalAmount,
+        amount: newBooking.finalAmount || totalAmount,
         currency: 'AED',
         paymentMethod: paymentMethod || 'cash',
-        paymentGateway: paymentMethod === 'card' ? 'stripe' : 'manual',
-        status: ['cash', 'giftcard', 'membership'].includes(paymentMethod) ? 'completed' : 'pending',
-        transactionId: `TXN-${newBooking.bookingNumber}-${Date.now()}`,
-        metadata: {
-          bookingNumber: newBooking.bookingNumber,
-          services: newBooking.services.map(s => ({
-            name: s.serviceName,
-            price: s.price
-          })),
-          paymentDetails: newBooking.paymentDetails
-        }
+        paymentGateway: gateway,
+        status: 'completed', // Admin bookings are pre-paid/confirmed, mark as completed
+        gatewayTransactionId: `TXN-${newBooking.bookingNumber}-${Date.now()}`,
+        metadata: metadata
       });
 
+      console.log('💾 Saving payment record to database...');
       await paymentRecord.save();
-      console.log('💳 Payment record created:', {
+      console.log('✅ Payment record created successfully:', {
         id: paymentRecord._id,
         amount: paymentRecord.amount,
         method: paymentRecord.paymentMethod,
+        gateway: paymentRecord.paymentGateway,
         status: paymentRecord.status,
-        bookingNumber: newBooking.bookingNumber
+        bookingNumber: newBooking.bookingNumber,
+        transactionId: paymentRecord.gatewayTransactionId,
+        createdAt: paymentRecord.createdAt
       });
+      console.log('='.repeat(80));
     } catch (paymentErr) {
-      console.error('❌ Failed to create payment record (non-critical):', paymentErr);
+      console.error('='.repeat(80));
+      console.error('❌ FAILED TO CREATE PAYMENT RECORD');
+      console.error('Error details:', paymentErr);
+      console.error('Error message:', paymentErr.message);
+      console.error('Error stack:', paymentErr.stack);
+      console.error('='.repeat(80));
       // Don't fail the booking if payment record creation fails
     }
 
