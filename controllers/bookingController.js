@@ -943,11 +943,23 @@ const createBooking = async (req, res) => {
     try {
       const Payment = require('../models/Payment');
       
+      console.log('🔍 Payment method received:', paymentMethod);
+      
+      // Map frontend payment methods to backend enum values
+      // Payment model accepts: card, bank_transfer, digital_wallet, cash, giftcard, membership
+      let mappedPaymentMethod = paymentMethod || 'cash';
+      if (paymentMethod === 'upi' || paymentMethod === 'online') {
+        mappedPaymentMethod = 'digital_wallet'; // Map UPI to digital_wallet
+        console.log('✅ Mapping UPI/online to digital_wallet');
+      }
+      
       // Determine payment gateway based on payment method
       // Payment model only accepts: stripe, paypal, square, adyen, payu, 2c2p, mercadopago, razorpay
       let gateway = 'stripe'; // Default gateway for card payments
       if (paymentMethod === 'cash' || paymentMethod === 'giftcard' || paymentMethod === 'membership') {
         gateway = 'square'; // Use square for manual/offline payments
+      } else if (paymentMethod === 'upi' || paymentMethod === 'online') {
+        gateway = 'razorpay'; // Use razorpay for UPI payments
       }
       
       // Prepare metadata as Map of strings only (Payment model requirement)
@@ -964,12 +976,16 @@ const createBooking = async (req, res) => {
         metadata.set('primaryServicePrice', (firstService.price || 0).toString());
       }
       
+      // Store original payment method for reference
+      metadata.set('originalPaymentMethod', paymentMethod || 'cash');
+      
       console.log('💳 Payment record data:', {
         user: clientUser._id,
         booking: newBooking._id,
         amount: newBooking.finalAmount || totalAmount,
         currency: 'AED',
-        paymentMethod: paymentMethod || 'cash',
+        originalPaymentMethod: paymentMethod,
+        mappedPaymentMethod: mappedPaymentMethod,
         paymentGateway: gateway,
         bookingNumber: newBooking.bookingNumber
       });
@@ -979,9 +995,9 @@ const createBooking = async (req, res) => {
         booking: newBooking._id,
         amount: newBooking.finalAmount || totalAmount,
         currency: 'AED',
-        paymentMethod: paymentMethod || 'cash',
+        paymentMethod: mappedPaymentMethod,
         paymentGateway: gateway,
-        status: 'completed', // Admin bookings are pre-paid/confirmed, mark as completed
+        status: 'pending', // Start as pending, will be marked completed when booking is completed
         gatewayTransactionId: `TXN-${newBooking.bookingNumber}-${Date.now()}`,
         metadata: metadata
       });
@@ -1629,6 +1645,28 @@ const updateBooking = async (req, res) => {
         }
       } catch (giftErr) {
         console.error('Gift card forfeiture error (booking update):', giftErr.message);
+      }
+    }
+
+    // Update payment status to 'completed' when booking status changes to 'completed'
+    if (updateData.status === 'completed') {
+      try {
+        const Payment = require('../models/Payment');
+        const paymentUpdate = await Payment.updateOne(
+          { booking: id, status: 'pending' },
+          { 
+            $set: { 
+              status: 'completed',
+              processedAt: new Date()
+            } 
+          }
+        );
+        if (paymentUpdate.modifiedCount > 0) {
+          console.log(`✅ Payment marked as completed for booking ${id}`);
+        }
+      } catch (paymentErr) {
+        console.error('Payment status update error:', paymentErr.message);
+        // Don't fail the booking update if payment update fails
       }
     }
 
