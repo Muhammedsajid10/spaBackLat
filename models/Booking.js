@@ -322,21 +322,25 @@ bookingSchema.pre('save', async function(next) {
     this.bookingNumber = `BK${year}${month}${day}${sequence.toString().padStart(4, '0')}`;
   }
   
-  // Calculate final amount - use customDiscount if present, otherwise use regular discount
-  if (this.customDiscount && this.customDiscount > 0) {
-    // Custom discount applied - use discountedTotal if provided, otherwise calculate
-    if (this.discountedTotal !== undefined && this.discountedTotal !== null) {
-      this.finalAmount = this.discountedTotal;
+  // Calculate final amount - ONLY if not already set by controller
+  // Controller sets finalAmount when custom discount/gift card/membership is applied
+  if (this.finalAmount === undefined || this.finalAmount === null) {
+    // No finalAmount set - calculate it
+    if (this.customDiscount && this.customDiscount > 0) {
+      // Custom discount applied - use discountedTotal if provided, otherwise calculate
+      if (this.discountedTotal !== undefined && this.discountedTotal !== null) {
+        this.finalAmount = this.discountedTotal;
+      } else {
+        this.finalAmount = this.totalAmount - this.customDiscount + this.taxAmount;
+      }
+      // Set discountAmount to match customDiscount for consistency
+      this.discountAmount = this.customDiscount;
     } else {
-      this.finalAmount = this.totalAmount - this.customDiscount + this.taxAmount;
+      // No custom discount - calculate normally
+      this.finalAmount = this.totalAmount - this.discountAmount + this.taxAmount;
     }
-    // Set discountAmount to match customDiscount for consistency
-    this.discountAmount = this.customDiscount;
-  } else if (this.finalAmount === undefined || this.finalAmount === null) {
-    // No custom discount and no finalAmount set - calculate normally
-    this.finalAmount = this.totalAmount - this.discountAmount + this.taxAmount;
   }
-  // If finalAmount is already set (from controller), respect it
+  // If finalAmount is already set (from controller), respect it - don't overwrite
   
   next();
 });
