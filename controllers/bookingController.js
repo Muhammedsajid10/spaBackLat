@@ -934,6 +934,42 @@ const createBooking = async (req, res) => {
       }
     }
 
+    // CREATE PAYMENT RECORD FOR THIS BOOKING
+    try {
+      const Payment = require('../models/Payment');
+      
+      const paymentRecord = new Payment({
+        user: clientUser._id,
+        booking: newBooking._id,
+        amount: totalAmount,
+        currency: 'AED',
+        paymentMethod: paymentMethod || 'cash',
+        paymentGateway: paymentMethod === 'card' ? 'stripe' : 'manual',
+        status: ['cash', 'giftcard', 'membership'].includes(paymentMethod) ? 'completed' : 'pending',
+        transactionId: `TXN-${newBooking.bookingNumber}-${Date.now()}`,
+        metadata: {
+          bookingNumber: newBooking.bookingNumber,
+          services: newBooking.services.map(s => ({
+            name: s.serviceName,
+            price: s.price
+          })),
+          paymentDetails: newBooking.paymentDetails
+        }
+      });
+
+      await paymentRecord.save();
+      console.log('💳 Payment record created:', {
+        id: paymentRecord._id,
+        amount: paymentRecord.amount,
+        method: paymentRecord.paymentMethod,
+        status: paymentRecord.status,
+        bookingNumber: newBooking.bookingNumber
+      });
+    } catch (paymentErr) {
+      console.error('❌ Failed to create payment record (non-critical):', paymentErr);
+      // Don't fail the booking if payment record creation fails
+    }
+
     const populatedBooking = await Booking.findById(newBooking._id)
       .populate('client', 'firstName lastName email phone')
       .populate({
