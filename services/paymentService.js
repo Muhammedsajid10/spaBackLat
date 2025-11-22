@@ -44,7 +44,8 @@ class StripeGateway extends BasePaymentGateway {
         description: metadata.description || 'SPA Booking Payment',
         returnUrl: metadata.returnUrl,
         cancelUrl: metadata.cancelUrl,
-        notifyUrl: metadata.notifyUrl
+        notifyUrl: metadata.notifyUrl,
+        metadata: metadata.metadata || {}
       };
 
       const result = await this.stripeService.createOrder(orderData);

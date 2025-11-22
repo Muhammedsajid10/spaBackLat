@@ -169,8 +169,15 @@ giftCardSchema.methods.useGiftCard = function(amount, userId, bookingId, notes) 
     notes: notes
   });
   this.remainingValue -= amount;
+  
+  // Round to 2 decimal places to avoid floating point precision issues
+  this.remainingValue = Math.round(this.remainingValue * 100) / 100;
+  
   console.log('[GiftCard.useGiftCard] After deduction:', { code: this.code, remainingValue: this.remainingValue });
-  if (this.remainingValue <= 0) {
+  
+  // Use tolerance check for floating point comparison
+  if (this.remainingValue < 0.01) {
+    this.remainingValue = 0; // Set exactly to 0
     this.status = 'Used';
     console.log('[GiftCard.useGiftCard] Status updated to Used:', this.code);
   } else {

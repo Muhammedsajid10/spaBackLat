@@ -66,6 +66,15 @@ const bookingSchema = new mongoose.Schema({
     default: 0,
     min: [0, 'Discount amount cannot be negative']
   },
+  customDiscount: {
+    type: Number,
+    default: 0,
+    min: [0, 'Custom discount cannot be negative']
+  },
+  discountedTotal: {
+    type: Number,
+    min: [0, 'Discounted total cannot be negative']
+  },
   taxAmount: {
     type: Number,
     default: 0,
@@ -313,8 +322,21 @@ bookingSchema.pre('save', async function(next) {
     this.bookingNumber = `BK${year}${month}${day}${sequence.toString().padStart(4, '0')}`;
   }
   
-  // Calculate final amount
-  this.finalAmount = this.totalAmount - this.discountAmount + this.taxAmount;
+  // Calculate final amount - use customDiscount if present, otherwise use regular discount
+  if (this.customDiscount && this.customDiscount > 0) {
+    // Custom discount applied - use discountedTotal if provided, otherwise calculate
+    if (this.discountedTotal !== undefined && this.discountedTotal !== null) {
+      this.finalAmount = this.discountedTotal;
+    } else {
+      this.finalAmount = this.totalAmount - this.customDiscount + this.taxAmount;
+    }
+    // Set discountAmount to match customDiscount for consistency
+    this.discountAmount = this.customDiscount;
+  } else if (this.finalAmount === undefined || this.finalAmount === null) {
+    // No custom discount and no finalAmount set - calculate normally
+    this.finalAmount = this.totalAmount - this.discountAmount + this.taxAmount;
+  }
+  // If finalAmount is already set (from controller), respect it
   
   next();
 });

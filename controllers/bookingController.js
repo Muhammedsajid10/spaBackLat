@@ -334,7 +334,14 @@ const createBookingConfirmation = async (req, res) => {
 // Create booking (supports multiple services & professionals + gift card / membership payment)
 const createBooking = async (req, res) => {
   try {
+    console.log('='.repeat(80));
+    console.log('🎯 CREATE BOOKING REQUEST RECEIVED');
+    console.log('='.repeat(80));
     console.log('🔍 FULL REQUEST BODY RECEIVED:', JSON.stringify(req.body, null, 2));
+    console.log('🔍 Request method:', req.method);
+    console.log('🔍 Request path:', req.path);
+    console.log('🔍 Request headers:', JSON.stringify(req.headers, null, 2));
+    console.log('='.repeat(80));
     
   let { 
     services: incomingServices, 
@@ -345,6 +352,8 @@ const createBooking = async (req, res) => {
     selectionMode, 
     paymentDetails: incomingPaymentDetails, 
     finalAmount: incomingFinalAmount, 
+    customDiscount: incomingCustomDiscount,
+    discountedTotal: incomingDiscountedTotal,
     giftCardCode,
     originalClientName,
     clientDisplayName,
@@ -363,12 +372,25 @@ const createBooking = async (req, res) => {
   });
 
 
+    console.log('📊 VALIDATION START');
+    console.log('✅ Services array:', {
+      exists: !!incomingServices,
+      isArray: Array.isArray(incomingServices),
+      length: incomingServices?.length || 0,
+      services: incomingServices
+    });
+    console.log('✅ Appointment date:', appointmentDate);
+
     if (!incomingServices || !Array.isArray(incomingServices) || incomingServices.length === 0) {
+      console.error('❌ VALIDATION FAILED: Services missing or invalid');
       return res.status(400).json({ success: false, message: 'At least one service is required' });
     }
     if (!appointmentDate) {
+      console.error('❌ VALIDATION FAILED: Appointment date missing');
       return res.status(400).json({ success: false, message: 'appointmentDate is required' });
     }
+    console.log('✅ VALIDATION PASSED');
+    console.log('='.repeat(80));
     // Normalize date (store midnight for day clarity)
     const apptDateObj = new Date(appointmentDate);
     if (isNaN(apptDateObj.getTime())) {
@@ -623,15 +645,27 @@ const createBooking = async (req, res) => {
       newBooking.paymentDetails = { ...incomingPaymentDetails };
       console.log('💾 Payment details attached to booking:', newBooking.paymentDetails);
     }
+    
+    // Handle custom discount from frontend
+    if (typeof incomingCustomDiscount === 'number' && incomingCustomDiscount > 0) {
+      newBooking.customDiscount = incomingCustomDiscount;
+      console.log('💰 Custom discount applied:', incomingCustomDiscount);
+    }
+    if (typeof incomingDiscountedTotal === 'number') {
+      newBooking.discountedTotal = incomingDiscountedTotal;
+      console.log('💰 Discounted total set:', incomingDiscountedTotal);
+    }
     if (typeof incomingFinalAmount === 'number') {
       newBooking.finalAmount = incomingFinalAmount;
+      console.log('💰 Final amount set from request:', incomingFinalAmount);
     }
     if (giftCardCode && !newBooking.giftCardCode) {
       newBooking.giftCardCode = giftCardCode;
     }
 
     // Ensure finalAmount is set (pre-save will also calculate it, but set here for validation)
-    if (!newBooking.finalAmount) {
+    // Skip recalculation if customDiscount is present - let pre-save hook handle it
+    if (!newBooking.finalAmount && !newBooking.customDiscount) {
       newBooking.finalAmount = newBooking.totalAmount - (newBooking.discountAmount || 0) + (newBooking.taxAmount || 0);
     }
 
@@ -860,7 +894,8 @@ const createBooking = async (req, res) => {
           });
           
           // Skip if already fully used/expired/cancelled
-          if (["Used","Expired","Cancelled"].includes(gc.status) || gc.remainingValue <= 0) {
+          // Use 0.01 tolerance to handle floating point precision issues
+          if (["Used","Expired","Cancelled"].includes(gc.status) || gc.remainingValue < 0.01) {
             console.warn('[BookingController] Gift card not usable (status or balance):', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue });
           } else {
             // Get redeem amount from paymentDetails.giftCard.redeemAmount or paymentDetails.redeemAmount
@@ -1496,7 +1531,7 @@ const updateBooking = async (req, res) => {
         if (giftCardId && redeemAmount > 0) {
           const GiftCard = require('../models/GiftCard');
           const gc = await GiftCard.findById(giftCardId);
-          if (gc && gc.remainingValue > 0) {
+          if (gc && gc.remainingValue > 0.01) {
             const amountToUse = Math.min(redeemAmount, gc.remainingValue);
             // Directly adjust remaining value (forfeiture) and push history entry
             gc.usageHistory.push({
@@ -1506,7 +1541,10 @@ const updateBooking = async (req, res) => {
               notes: 'Auto-forfeited due to no-show'
             });
             gc.remainingValue -= amountToUse;
-            if (gc.remainingValue <= 0) {
+            // Round to 2 decimal places
+            gc.remainingValue = Math.round(gc.remainingValue * 100) / 100;
+            if (gc.remainingValue < 0.01) {
+              gc.remainingValue = 0;
               gc.status = 'Used';
             } else if (gc.remainingValue < gc.value) {
               gc.status = 'Partially Used';
@@ -1647,7 +1685,7 @@ const updateServiceStatus = async (req, res) => {
           if (giftCardId && redeemAmount > 0) {
             const GiftCard = require('../models/GiftCard');
             const gc = await GiftCard.findById(giftCardId);
-            if (gc && gc.remainingValue > 0) {
+            if (gc && gc.remainingValue > 0.01) {
               const amountToUse = Math.min(redeemAmount, gc.remainingValue);
               gc.usageHistory.push({
                 amountUsed: amountToUse,
@@ -1656,7 +1694,9 @@ const updateServiceStatus = async (req, res) => {
                 notes: 'Auto-forfeited due to no-show (service-level)'
               });
               gc.remainingValue -= amountToUse;
-              if (gc.remainingValue <= 0) gc.status = 'Used'; else if (gc.remainingValue < gc.value) gc.status = 'Partially Used';
+              // Round to 2 decimal places
+              gc.remainingValue = Math.round(gc.remainingValue * 100) / 100;
+              if (gc.remainingValue < 0.01) { gc.remainingValue = 0; gc.status = 'Used'; } else if (gc.remainingValue < gc.value) gc.status = 'Partially Used';
               await gc.save();
             }
           }
