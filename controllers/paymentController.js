@@ -736,25 +736,43 @@ const getAllPayments = catchAsync(async (req, res, next) => {
     query.createdAt = { $gte: start, $lte: end };
   }
 
-  const payments = await Payment.find(query)
+  // First, get all payments with populated booking data
+  const allPayments = await Payment.find(query)
     .populate('user', 'firstName lastName email')
     .populate({
       path: 'booking',
       select: 'bookingNumber appointmentDate status',
     })
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(parseInt(limit));
+    .sort({ createdAt: -1 });
 
-  const total = await Payment.countDocuments(query);
+  console.log(`📊 Total payments found: ${allPayments.length}`);
+
+  // Filter payments where booking status is 'completed'
+  const completedPayments = allPayments.filter(payment => {
+    const hasBooking = !!payment.booking;
+    const isCompleted = hasBooking && payment.booking.status === 'completed';
+    
+    if (!hasBooking) {
+      console.log(`⏭️ Skipping payment ${payment._id} - No booking attached`);
+    } else if (!isCompleted) {
+      console.log(`⏭️ Skipping payment ${payment._id} - Booking status: ${payment.booking.status}`);
+    }
+    
+    return isCompleted;
+  });
+
+  console.log(`✅ Completed payments (booking status = completed): ${completedPayments.length}`);
+
+  // Apply pagination to filtered results
+  const paginatedPayments = completedPayments.slice(skip, skip + parseInt(limit));
 
   res.status(200).json({
     success: true,
-    results: payments.length,
-    total,
+    results: paginatedPayments.length,
+    total: completedPayments.length,
     filtered: !!date,
     date: date || null,
-    data: { payments }
+    data: { payments: paginatedPayments }
   });
 });
 

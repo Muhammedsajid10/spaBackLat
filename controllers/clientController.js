@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
 const Feedback = require('../models/Feedback');
@@ -157,7 +158,7 @@ const updateClient = catchAsync(async (req, res, next) => {
 
   // Filter out fields that shouldn't be updated
   const allowedFields = [
-    'firstName', 'lastName', 'phone', 'dateOfBirth', 'gender', 
+    'firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender', 
     'address', 'profileImage', 'preferences'
   ];
 
@@ -267,7 +268,7 @@ const getClientStats = catchAsync(async (req, res, next) => {
 
   // Get booking statistics
   const bookingStats = await Booking.aggregate([
-    { $match: { client: mongoose.Types.ObjectId(clientId) } },
+    { $match: { client: new mongoose.Types.ObjectId(clientId) } },
     {
       $group: {
         _id: '$status',
@@ -279,7 +280,7 @@ const getClientStats = catchAsync(async (req, res, next) => {
 
   // Get total bookings and spending
   const totalStats = await Booking.aggregate([
-    { $match: { client: mongoose.Types.ObjectId(clientId) } },
+    { $match: { client: new mongoose.Types.ObjectId(clientId) } },
     {
       $group: {
         _id: null,
@@ -292,7 +293,7 @@ const getClientStats = catchAsync(async (req, res, next) => {
 
   // Get favorite services
   const favoriteServices = await Booking.aggregate([
-    { $match: { client: mongoose.Types.ObjectId(clientId) } },
+    { $match: { client: new mongoose.Types.ObjectId(clientId) } },
     { $unwind: '$services' },
     {
       $group: {
