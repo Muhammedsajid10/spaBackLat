@@ -225,6 +225,7 @@ const deleteClient = catchAsync(async (req, res, next) => {
 // Get client booking history
 const getClientBookings = catchAsync(async (req, res, next) => {
   const clientId = req.params.id;
+  const { includeAll } = req.query; // Check if we should include all statuses
 
   // Check if user can access this client's bookings
   if (req.user.role === 'client' && clientId !== req.user._id.toString()) {
@@ -234,23 +235,35 @@ const getClientBookings = catchAsync(async (req, res, next) => {
     });
   }
 
-  const features = new APIFeatures(
-    Booking.find({ client: clientId }), 
-    req.query
-  )
-    .filter()
-    .sort()
-    .limitFields()
-    .paginate();
-
-  const bookings = await features.query;
+  // Build query - if includeAll is true, get all bookings, otherwise filter by status
+  let query = { client: clientId };
+  
+  if (!includeAll || includeAll === 'false') {
+    // Filter for only confirmed, noshow, complete, started statuses
+    const statusFilter = ['confirmed', 'noshow', 'complete', 'started'];
+    query.status = { $in: statusFilter };
+  }
+  
+  const bookings = await Booking.find(query)
+    .populate({
+      path: 'services.service',
+      select: 'name price duration'
+    })
+    .populate({
+      path: 'services.employee',
+      select: 'firstName lastName user',
+      populate: {
+        path: 'user',
+        select: 'firstName lastName'
+      }
+    })
+    .sort('-appointmentDate')
+    .limit(100); // Limit to last 100 bookings for performance
 
   res.status(200).json({
     success: true,
     results: bookings.length,
-    data: {
-      bookings
-    }
+    data: bookings
   });
 });
 

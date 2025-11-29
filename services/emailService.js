@@ -1,4 +1,11 @@
 const nodemailer = require('nodemailer');
+const sgMail = require('@sendgrid/mail');
+
+// Initialize SendGrid if API key is available
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  console.log('✉️ SendGrid initialized');
+}
 
 class EmailService {
   constructor() {}
@@ -301,11 +308,43 @@ class EmailService {
   }
 
   async _sendViaSMTP(msg) {
-    // Ensure SMTP envs are present
+    // Try SendGrid first if available
+    if (process.env.SENDGRID_API_KEY) {
+      try {
+        console.log('📧 Attempting to send via SendGrid...');
+        console.log('📧 SendGrid FROM:', msg.from || process.env.EMAIL_FROM);
+        console.log('📧 SendGrid TO:', msg.to);
+        const result = await sgMail.send({
+          to: msg.to,
+          from: msg.from || process.env.EMAIL_FROM,
+          subject: msg.subject,
+          html: msg.html,
+        });
+        console.log('✅ Email sent successfully via SendGrid');
+        return { messageId: result[0]?.headers['x-message-id'] || 'sendgrid-sent' };
+      } catch (sendGridError) {
+        console.error('❌ SendGrid failed with full error:', sendGridError);
+        if (sendGridError.response) {
+          console.error('SendGrid response body:', sendGridError.response.body);
+        }
+        console.log('⚠️ Falling back to SMTP...');
+      }
+    } else {
+      console.log('⚠️ SendGrid API key not found, using SMTP directly');
+    }
+
+    // Fallback to SMTP
     const { SMTP_HOST, SMTP_USER, SMTP_PASS } = process.env;
     if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
-      throw new Error('SMTP not configured (SMTP_HOST/SMTP_USER/SMTP_PASS)');
+      throw new Error('Neither SendGrid nor SMTP is properly configured');
     }
+    
+    console.log('📧 Using SMTP fallback...');
+    console.log('   Host:', SMTP_HOST);
+    console.log('   Port:', process.env.SMTP_PORT);
+    console.log('   Secure:', process.env.SMTP_SECURE);
+    console.log('   User:', SMTP_USER);
+    
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: process.env.SMTP_PORT || 587,
@@ -314,7 +353,20 @@ class EmailService {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
+      debug: true, // Enable debug logs
+      logger: true // Enable logger
     });
+    
+    // Verify connection before sending
+    try {
+      console.log('🔍 Verifying SMTP connection...');
+      await transporter.verify();
+      console.log('✅ SMTP connection verified');
+    } catch (verifyError) {
+      console.error('❌ SMTP verification failed:', verifyError.message);
+      throw new Error(`SMTP connection failed: ${verifyError.message}`);
+    }
+    
     return await transporter.sendMail({
       from: msg.from || process.env.EMAIL_FROM,
       to: msg.to,

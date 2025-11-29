@@ -736,12 +736,30 @@ const getAllPayments = catchAsync(async (req, res, next) => {
     query.createdAt = { $gte: start, $lte: end };
   }
 
-  // First, get all payments with populated booking data
+  // First, get all payments with populated booking data including services and employees
   const allPayments = await Payment.find(query)
-    .populate('user', 'firstName lastName email')
+    .populate('user', 'firstName lastName email phone')
     .populate({
       path: 'booking',
-      select: 'bookingNumber appointmentDate status',
+      select: 'bookingNumber appointmentDate status services client',
+      populate: [
+        {
+          path: 'services.service',
+          select: 'name price duration'
+        },
+        {
+          path: 'services.employee',
+          select: 'firstName lastName user',
+          populate: {
+            path: 'user',
+            select: 'firstName lastName'
+          }
+        },
+        {
+          path: 'client',
+          select: 'firstName lastName email phone'
+        }
+      ]
     })
     .sort({ createdAt: -1 });
 

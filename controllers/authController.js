@@ -707,7 +707,8 @@ const forgotPassword = catchAsync(async (req, res, next) => {
     res.status(200).json({
       success: true,
       message: 'Password reset instructions sent to your email',
-      resetToken: process.env.NODE_ENV === 'development' ? resetToken : undefined
+      resetToken: process.env.NODE_ENV === 'development' ? resetToken : undefined,
+      resetURL: process.env.NODE_ENV === 'development' ? resetURL : undefined
     });
   } catch (err) {
     console.error('Password reset email error:', err);
