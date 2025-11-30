@@ -1,6 +1,8 @@
 const express = require('express');
 const adminController = require('../controllers/adminController');
 const clientController = require('../controllers/clientController');
+const allergyController = require('../controllers/allergyController');
+const noteController = require('../controllers/noteController');
 const { protect } = require('../middleware/authMiddleware');
 const { isAdmin, isStaff, logUserAction } = require('../middleware/roleMiddleware');
 const { getCashMovementSummary, getDailyTransactionSummary } = require('../controllers/paymentController');
@@ -52,6 +54,21 @@ router.get('/clients/:id/stats', isStaff, clientController.getClientStats);
 router.get('/clients/:id/preferences', isStaff, clientController.getClientPreferences);
 router.patch('/clients/:id/preferences', isStaff, logUserAction('update_client_preferences'), clientController.updateClientPreferences);
 router.get('/clients/:id/loyalty-points', isStaff, clientController.getClientLoyaltyPoints);
+
+// Allergy management routes
+router.get('/allergies/config', allergyController.getAllergyConfig); // Public config endpoint
+router.get('/clients/:id/allergies', isStaff, allergyController.getClientAllergies);
+router.post('/clients/:id/allergies', isStaff, logUserAction('add_allergy'), allergyController.createAllergy);
+router.patch('/allergies/:allergyId', isStaff, logUserAction('update_allergy'), allergyController.updateAllergy);
+router.delete('/allergies/:allergyId', isStaff, logUserAction('delete_allergy'), allergyController.deleteAllergy);
+router.patch('/allergies/:allergyId/resolve', isStaff, logUserAction('resolve_allergy'), allergyController.resolveAllergy);
+
+// Note management routes
+router.get('/clients/:id/notes', isStaff, noteController.getClientNotes);
+router.post('/clients/:id/notes', isStaff, logUserAction('add_note'), noteController.createNote);
+router.patch('/notes/:noteId', isStaff, logUserAction('update_note'), noteController.updateNote);
+router.delete('/notes/:noteId', isStaff, logUserAction('delete_note'), noteController.deleteNote);
+router.patch('/notes/:noteId/toggle-pin', isStaff, logUserAction('toggle_pin_note'), noteController.togglePinNote);
 
 module.exports = router;
 
