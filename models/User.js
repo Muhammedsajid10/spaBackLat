@@ -20,15 +20,15 @@ const userSchema = new mongoose.Schema({
     // required: [true, 'Email is required'],
     unique: true,
     sparse: true, // Allow multiple null/undefined values for unique constraint
-    lowercase: true,
-    validate: {
-      validator: function(v) {
-        // Allow empty/null emails, but validate format if provided
-        if (!v || v.trim() === '') return true;
-        return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
-      },
-      message: 'Please enter a valid email'
-    }
+    // lowercase: true,
+    // validate: {
+    //   validator: function(v) {
+    //     // Allow empty/null emails, but validate format if provided
+    //     if (!v || v.trim() === '') return true;
+    //     return /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/.test(v);
+    //   },
+    //   message: 'Please enter a valid email'
+    // }
   },
   password: {
     type: String,
@@ -58,6 +58,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: ['male', 'female', 'other'],
     default: 'other'
+  },
+  pronouns: {
+    type: String,
+    enum: ['He/Him', 'She/Her', 'They/Them', 'Not specified'],
+    default: 'Not specified'
   },
   address: {
     street: String,

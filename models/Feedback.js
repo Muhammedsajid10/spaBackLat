@@ -252,6 +252,17 @@ feedbackSchema.pre(/^find/, function(next) {
       path: 'user',
       select: 'firstName lastName'
     }
+  }).populate({
+    path: 'booking',
+    select: 'appointmentDate appointmentTime startTime services',
+    populate: {
+      path: 'services.service services.employee',
+      select: 'name user',
+      populate: {
+        path: 'user',
+        select: 'firstName lastName'
+      }
+    }
   });
   next();
 });

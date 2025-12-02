@@ -158,7 +158,7 @@ const updateClient = catchAsync(async (req, res, next) => {
 
   // Filter out fields that shouldn't be updated
   const allowedFields = [
-    'firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender', 
+    'firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'gender', 'pronouns',
     'address', 'profileImage', 'preferences'
   ];
 
@@ -339,9 +339,30 @@ const getClientStats = catchAsync(async (req, res, next) => {
   const recentFeedback = await Feedback.find({ client: clientId })
     .sort('-createdAt')
     .limit(5)
-    .populate('service', 'name')
-    .populate('employee', 'user')
-    .populate('employee.user', 'firstName lastName');
+    .populate({
+      path: 'booking',
+      select: 'appointmentDate appointmentTime startTime services',
+      populate: {
+        path: 'services.service services.employee',
+        select: 'name user',
+        populate: {
+          path: 'user',
+          select: 'firstName lastName'
+        }
+      }
+    })
+    .populate({
+      path: 'service',
+      select: 'name'
+    })
+    .populate({
+      path: 'employee',
+      select: 'user',
+      populate: {
+        path: 'user',
+        select: 'firstName lastName'
+      }
+    });
 
   res.status(200).json({
     success: true,
