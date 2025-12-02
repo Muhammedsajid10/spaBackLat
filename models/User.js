@@ -42,21 +42,21 @@ const userSchema = new mongoose.Schema({
   phone: {
     type: String,
     // required: [true, 'Phone number is required'],
-    validate: {
-      validator: function(v) {
-        // Allow empty/null phone numbers, but validate format if provided
-        if (!v || v.trim() === '') return true;
-        return /^[\+]?[1-9][\d]{0,15}$/.test(v);
-      },
-      message: 'Please enter a valid phone number'
-    }
+    // validate: {
+    //   validator: function(v) {
+    //     // Allow empty/null phone numbers, but validate format if provided
+    //     if (!v || v.trim() === '') return true;
+    //     return /^[\+]?[1-9][\d]{0,15}$/.test(v);
+    //   },
+    //   message: 'Please enter a valid phone number'
+    // }
   },
   dateOfBirth: {
     type: Date
   },
   gender: {
     type: String,
-    enum: ['male', 'female', 'other'],
+enum: ["Male", "Female", "Non-binary", "Prefer not to say"],
     default: 'other'
   },
   pronouns: {

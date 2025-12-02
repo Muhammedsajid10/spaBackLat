@@ -342,14 +342,20 @@ const getClientStats = catchAsync(async (req, res, next) => {
     .populate({
       path: 'booking',
       select: 'appointmentDate appointmentTime startTime services',
-      populate: {
-        path: 'services.service services.employee',
-        select: 'name user',
-        populate: {
-          path: 'user',
-          select: 'firstName lastName'
+      populate: [
+        {
+          path: 'services.service',
+          select: 'name'
+        },
+        {
+          path: 'services.employee',
+          select: 'user',
+          populate: {
+            path: 'user',
+            select: 'firstName lastName'
+          }
         }
-      }
+      ]
     })
     .populate({
       path: 'service',
