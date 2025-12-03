@@ -56,7 +56,7 @@ const userSchema = new mongoose.Schema({
   },
   gender: {
     type: String,
-enum: ['',"Male", "Female", "Non-binary", "Prefer not to say"],
+enum: ['',"Male", "Female", "Non-binary", "Prefer not to say",'male','female','other'],
     default: 'other'
   },
   pronouns: {
