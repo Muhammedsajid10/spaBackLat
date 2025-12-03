@@ -33,9 +33,17 @@ const getAllGiftCardTemplates = async (req, res) => {
 
 const getAllPurchasedGiftCards = async (req, res) => {
   try {
-    const { status, startDate, endDate } = req.query;
+    const { status, startDate, endDate, clientId } = req.query;
+    
+    console.log('🎁 getAllPurchasedGiftCards - Query params:', { status, startDate, endDate, clientId });
     
     let filter = { isTemplate: false };
+    
+    // Filter by client ID if provided
+    if (clientId) {
+      filter.purchasedBy = clientId;
+      console.log('🎁 Adding clientId filter:', clientId);
+    }
     
     if (status) filter.status = status;
     if (startDate || endDate) {
@@ -44,10 +52,17 @@ const getAllPurchasedGiftCards = async (req, res) => {
       if (endDate) filter.purchaseDate.$lte = new Date(endDate);
     }
 
+    console.log('🎁 Final filter object:', JSON.stringify(filter, null, 2));
+
     const giftCards = await GiftCard.find(filter)
       .populate('purchasedBy', 'firstName lastName email')
       .populate('usageHistory.usedBy', 'firstName lastName')
       .sort({ purchaseDate: -1 });
+    
+    console.log('🎁 Found gift cards count:', giftCards.length);
+    if (giftCards.length > 0) {
+      console.log('🎁 First gift card purchasedBy:', giftCards[0].purchasedBy);
+    }
     
     // Return all gift cards without filtering by remainingValue
     // The frontend will handle display based on status
