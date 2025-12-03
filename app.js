@@ -65,7 +65,7 @@ app.use(cors({
     
     // Default allowed origins for development and common deployment platforms
     const defaultAllowedOrigins = [
-      'http://localhost:3000',
+      'http://localhost:5175',
       'http://localhost:5173',
       'http://localhost:5175',
       'http://localhost:5176',
@@ -78,7 +78,8 @@ app.use(cors({
       'https://localhost:5177',
       'https://tourmaline-choux-90907f.netlify.app',
       'https://admin.alloraspadubai.com',
-      'https://user.alloraspadubai.com'
+      'https://booking.alloraspadubai.com',
+      'https://employee.alloraspadubai.com'
     ];
     
     // Get allowed origins from environment or use defaults

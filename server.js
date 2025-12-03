@@ -19,7 +19,7 @@ const connectDB = require('./config/db');
 connectDB();
 
 // Start server
-const port = process.env.PORT || 5000;
+const port = process.env.PORT || 6000;
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${port} in ${process.env.NODE_ENV} mode`);
   console.log(`📱 API available at: http://localhost:${port}/api/v1`);
