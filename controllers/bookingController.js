@@ -495,7 +495,7 @@ const createBooking = async (req, res) => {
 
     // Preload existing bookings for the day to avoid conflicts
     const existingDayBookings = await Booking.find({ appointmentDate: { $gte: dayStart, $lt: dayEnd } })
-      .select('services.startTime services.endTime services.employee');
+      .select('services.startTime services.endTime services.employee services.employees');
     const bookingsByEmployee = new Map();
     
     // Helper function to normalize employee identifier for conflict checking
@@ -518,7 +518,7 @@ const createBooking = async (req, res) => {
       return null;
     };
     
-    existingDayBookings.forEach(b => {
+   /* existingDayBookings.forEach(b => {
       (b.services || []).forEach(svc => {
         if (!svc.employee) return;
         const key = getEmployeeKey(svc.employee);
@@ -530,7 +530,28 @@ const createBooking = async (req, res) => {
         bookingsByEmployee.get(key).push({ start: new Date(svc.startTime), end: new Date(svc.endTime) });
         console.log(`📅 Added existing booking for employee ${key}: ${new Date(svc.startTime)} - ${new Date(svc.endTime)}`);
       });
-    });
+    });*/
+    
+    existingDayBookings.forEach(b=>{
+      (b.services||[]).forEach(svc=>{
+       const emplist = new Set();
+      if (svc.employee) emplist.add(String(svc.employee));
+      if (Array.isArray(svc.employees)) {
+      svc.employees.forEach(e => emplist.add(String(e)));
+      }
+
+      emplist.forEach(emp => {
+      if (!bookingsByEmployee.has(emp)) {
+       bookingsByEmployee.set(emp, []);
+       }
+       bookingsByEmployee.get(emp).push({
+       start: new Date(svc.startTime),
+       end: new Date(svc.endTime)
+       });
+      });
+
+      })
+    })
 
     console.log(`🔍 Total existing bookings by employee:`, Array.from(bookingsByEmployee.entries()).map(([k, v]) => ({ employeeId: k, bookings: v.length })));
 
@@ -556,7 +577,8 @@ const createBooking = async (req, res) => {
       console.log(`🔍 Processing service ${serviceDoc.name}:`, {
         rawStartTime: raw.startTime,
         rawEndTime: raw.endTime,
-        rawEmployee: raw.employee
+        rawEmployee: raw.employee,
+        rawEmployees: raw.employees  
       });
       
       // Determine start/end times (use provided or default sequential based on provided)
@@ -573,8 +595,75 @@ const createBooking = async (req, res) => {
         endTime: endTime.toISOString()
       });
 
-      let employeeId = raw.employee || raw.employeeId; // expected field from frontend
-      if (!employeeId || employeeId === 'any') {
+    /* let employeeId = raw.employee || raw.employeeId; // expected field from frontend*/
+    let employeeIds = [];
+      if (Array.isArray(raw.employees) && raw.employees.length > 0) {
+       employeeIds = raw.employees;
+      }
+      else if (raw.employee || raw.employeeId) {
+       employeeIds = [raw.employee || raw.employeeId];
+      }
+      if (employeeIds.length === 0)
+       {
+       return res.status(400).json({
+       success: false,
+       message: `At least one professional is required for service '${serviceDoc.name}'`
+       });
+       }
+       
+       const validatedEmployees = [];
+       for (let empId of employeeIds) {
+       if (empId === 'any') {
+      const candidate = allActiveEmployees.find(emp => {
+      if (!isWorking(emp, startTime)) return false;
+      const existing = bookingsByEmployee.get(String(emp._id)) || [];
+      return !overlaps(existing, startTime, endTime);
+      });
+
+      if (!candidate) {
+      return res.status(409).json({
+        success: false,
+        message: `No available professional for '${serviceDoc.name}' at selected time.`
+      })
+     }
+     empId = candidate._id;
+   }
+
+  // Validate employee exists
+     const empDoc = allActiveEmployees.find(
+    e => String(e._id) === String(empId)
+   )
+
+  if (!empDoc) {
+    return res.status(404).json({
+      success: false,
+      message: `Employee not found or inactive: ${empId}`
+    })
+  }
+
+  // overlap check
+  const existingRanges = bookingsByEmployee.get(String(empId)) || [];
+  if (overlaps(existingRanges, startTime, endTime)) {
+    return res.status(409).json({
+      success: false,
+      message: `Professional has a conflicting booking for service '${serviceDoc.name}'.`
+    });
+  }
+
+  // Reserve slot immediately
+  if (!bookingsByEmployee.has(String(empId))) {
+    bookingsByEmployee.set(String(empId), []);
+  }
+  bookingsByEmployee.get(String(empId)).push({
+    start: startTime,
+    end: endTime
+  });
+
+  validatedEmployees.push(empId);
+}
+
+/*.....................................................................*/
+    /*  if (!employeeId || employeeId === 'any') {
         // Auto assign first available employee not overlapping
         const candidate = allActiveEmployees.find(emp => {
           if (!isWorking(emp, startTime)) return false;
@@ -620,7 +709,18 @@ const createBooking = async (req, res) => {
         startTime,
         endTime,
         notes: raw.notes || ''
-      });
+      });*/
+      transformedServices.push({
+  service: serviceDoc._id,
+  employee: validatedEmployees[0],
+  employees: validatedEmployees,
+  price: serviceDoc.price,
+  duration: serviceDoc.duration,
+  startTime,
+  endTime,
+  notes: raw.notes || ''
+});
+
     }
 
     const totalAmount = transformedServices.reduce((sum, s) => sum + s.price, 0);
@@ -1032,14 +1132,24 @@ const createBooking = async (req, res) => {
         model: 'Service',
       })
       .populate({
-        path: 'services.employee',
+        path: 'services.employees',
         model: 'Employee',
         populate: {
           path: 'user',
           model: 'User',
           select: 'firstName lastName',
         },
-      });
+      })
+        .populate({
+        path: 'services.employee',
+        model: 'Employee',
+        populate: {
+        path: 'user',
+        model: 'User',
+        select: 'firstName lastName',
+       },
+     })
+
 
     // Update the newBooking with populated client for email sending
     if (populatedBooking && populatedBooking.client && populatedBooking.client.email) {
@@ -1088,6 +1198,16 @@ const getUserBookings = async (req, res) => {
           select: 'firstName lastName email'
         }
       })
+      .populate({
+        path:'services.employees',
+        model:'Employee',
+        select:'user position employeeId',
+        populate:{
+          path:'user',
+          model:'User',
+          select:'firstName lastName email'
+        }
+      })
       .sort({ appointmentDate: -1 });
 
     res.json({
@@ -1112,8 +1232,26 @@ const getBooking = async (req, res) => {
 
     const booking = await Booking.findOne({ _id: id, client: userId })
       .populate('services.service', 'name price duration')
-      .populate('services.employee', 'user position');
-
+     .populate({
+        path: 'services.employee',
+        model: 'Employee',
+        select: 'user position employeeId',
+        populate: {
+          path: 'user',
+          model: 'User',
+          select: 'firstName lastName email'
+        }
+      })
+      .populate({
+        path: 'services.employees',
+        model: 'Employee',
+        select: 'user position employeeId',
+        populate: {
+          path: 'user',
+          model: 'User',
+          select: 'firstName lastName email'
+        }
+      });
     if (!booking) {
       return res.status(404).json({
         success: false,
@@ -1381,6 +1519,7 @@ const getAllBookings = async (req, res) => {
               unpopulatedEmployeeIds.add(employeeId);
             }
           }
+
         });
       }
     });

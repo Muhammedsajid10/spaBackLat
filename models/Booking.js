@@ -21,8 +21,13 @@ const bookingSchema = new mongoose.Schema({
     employee: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Employee',
-      required: [true, 'Employee is required']
+     // required: [true, 'Employee is required']
+       required:false
     },
+    employees:[{
+      type:mongoose.Schema.Types.ObjectId,
+      ref:'Employee'
+    }],
     price: {
       type: Number,
       required: [true, 'Service price is required'],
