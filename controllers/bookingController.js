@@ -1,3 +1,1989 @@
+// const Booking = require('../models/Booking');
+// const Service = require('../models/Service');
+// const Employee = require('../models/Employee');
+// const User = require('../models/User');
+// const EmailService = require('../services/emailService');
+// const mongoose = require('mongoose');
+// // const { apiUtils } = require('../utils/apiUtils');
+
+
+
+
+
+// // ========================================
+// // PUBLIC BOOKING CONTROLLERS (No Auth Required)
+// // ========================================
+
+// // Get available services for booking
+// const getAvailableServices = async (req, res) => {
+//   try {
+//     const services = await Service.find({ isActive: true })
+//       .select('name description price duration category isPopular')
+//       .sort({ isPopular: -1, name: 1 });
+
+//     res.json({
+//       success: true,
+//       results: services.length,
+//       data: { services }
+//     });
+//   } catch (error) {
+//     console.error('Error fetching available services:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch available services'
+//     });
+//   }
+// };
+
+// // Get available professionals for a specific service and date
+// const getAvailableProfessionals = async (req, res) => {
+//   try {
+//     const { service, date } = req.query;
+
+//     // console.log('getAvailableProfessionals called with:', req.query);
+
+//     if (!service || !date) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Service ID and date are required'
+//       });
+//     }
+
+//     // First, get the service to check its category/type
+//     const serviceDoc = await Service.findById(service);
+//     if (!serviceDoc) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Service not found'
+//       });
+//     }
+
+//     // Find employees who can perform this type of service based on their specializations
+//     // For now, we'll get all active employees and filter by position/department
+//     const employees = await Employee.find({
+//       isActive: true
+//     })
+//     .populate('user', 'firstName lastName email')
+//     .select('user position employeeId specializations performance workSchedule department');
+
+//     // console.log('Found employees:', employees.length);
+
+//     // Filter employees based on availability for the given date
+//     const availableEmployees = employees.filter(employee => {
+//       const dayOfWeek = new Date(date).getDay(); // 0 = Sunday, 1 = Monday, etc.
+//       const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+//       const dayName = dayNames[dayOfWeek];
+
+//       // Prefer date-specific schedule (YYYY-MM-DD) then fallback to weekday-based
+//       let schedule;
+//       try {
+//         if (employee.workSchedule instanceof Map) {
+//           // Try specific date key first
+//           schedule = employee.workSchedule.get(date);
+//           if (!schedule) schedule = employee.workSchedule.get(dayName);
+//         } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
+//           schedule = employee.workSchedule[date] || employee.workSchedule[dayName];
+//         } else if (employee.legacyWorkSchedule) {
+//           // Fallback to legacy schedule if available
+//           schedule = employee.legacyWorkSchedule[date] || employee.legacyWorkSchedule[dayName] || employee.legacyWorkSchedule[dayName];
+//         }
+//       } catch (err) {
+//         console.error('Error reading workSchedule for employee', employee._id, err);
+//         schedule = null;
+//       }
+
+//       // If schedule explicitly marks isWorking false or missing, treat as not available
+//       return schedule && schedule.isWorking;
+//     });
+
+//     // console.log('Available employees:', availableEmployees.length);
+
+//     // Transform the data to include necessary information for clients including workSchedule
+//     const professionals = availableEmployees.map(employee => {
+//       // Convert Map to plain object for workSchedule
+//       let workScheduleObj = {};
+//       if (employee.workSchedule instanceof Map) {
+//         // Convert Map to plain object
+//         for (let [key, value] of employee.workSchedule) {
+//           workScheduleObj[key] = value;
+//         }
+//       } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
+//         workScheduleObj = employee.workSchedule;
+//       }
+
+//       // Convert Map to plain object for legacyWorkSchedule
+//       let legacyWorkScheduleObj = {};
+//       if (employee.legacyWorkSchedule instanceof Map) {
+//         for (let [key, value] of employee.legacyWorkSchedule) {
+//           legacyWorkScheduleObj[key] = value;
+//         }
+//       } else if (employee.legacyWorkSchedule && typeof employee.legacyWorkSchedule === 'object') {
+//         legacyWorkScheduleObj = employee.legacyWorkSchedule;
+//       }
+
+//       // console.log(`[BookingController] Professional workSchedule conversion`);
+
+//       return {
+//         _id: employee._id,
+//         user: {
+//           firstName: employee.user.firstName,
+//           lastName: employee.user.lastName
+//         },
+//         position: employee.position,
+//         employeeId: employee.employeeId,
+//         specializations: employee.specializations || [],
+//         performance: {
+//           ratings: employee.performance?.ratings || { average: 0, count: 0 }
+//         },
+//         // Include workSchedule for client-side time slot generation (converted from Map)
+//         workSchedule: workScheduleObj,
+//         // Also include legacy schedule as fallback (converted from Map)
+//         legacyWorkSchedule: legacyWorkScheduleObj
+//       };
+//     });
+    
+//     res.json({
+//       success: true,
+//       results: professionals.length,
+//       data: { professionals }
+//     });
+//   } catch (error) {
+//     console.error('Error fetching available professionals:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch available professionals'
+//     });
+//   }
+// };
+
+// // Get available time slots for a professional
+// const getAvailableTimeSlots = async (req, res) => {
+//   try {
+//     const { employeeId, serviceId, date } = req.query;
+
+//     // console.log('getAvailableTimeSlots called with:', req.query);
+
+//     if (!employeeId || !serviceId || !date) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Employee ID, service ID, and date are required'
+//       });
+//     }
+
+//     // Find the employee
+//     const employee = await Employee.findById(employeeId)
+//       .populate('user', 'firstName lastName');
+
+//     if (!employee) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Professional not found'
+//       });
+//     }
+
+//     // console.log('Found employee:', employee.user.firstName, employee.user.lastName);
+
+//     // Get the service to know its duration
+//     const service = await Service.findById(serviceId);
+//     if (!service) {
+//     return res.status(404).json({
+//       success: false,
+//         message: 'Service not found'
+//       });
+//     }
+
+//     // console.log('Found service:', service.name, 'Duration:', service.duration);
+
+//     // Get the day of week for the given date
+//     const dayOfWeek = new Date(date).getDay();
+//     const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+//     const dayName = dayNames[dayOfWeek];
+    
+//     // Handle both Map and Object formats for workSchedule with DATE-SPECIFIC PRIORITY
+//     let schedule;
+//     if (employee.workSchedule instanceof Map) {
+//       // First try to get by specific date (new format - PRIORITY)
+//       const specificDateKey = date; // YYYY-MM-DD format
+//       schedule = employee.workSchedule.get(specificDateKey);
+//       // console.log('🕒 Trying specific date key (Map):', specificDateKey, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+      
+//       // If not found, try by day name (legacy format)
+//       if (!schedule) {
+//         schedule = employee.workSchedule.get(dayName);
+//         // console.log('🕒 Fallback to day key (Map):', dayName, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+//       }
+//     } else if (employee.workSchedule && typeof employee.workSchedule === 'object') {
+//       // First try specific date (new format - PRIORITY)
+//       const specificDateKey = date; // YYYY-MM-DD format
+//       schedule = employee.workSchedule[specificDateKey];
+//       // console.log('🕒 Trying specific date key (Object):', specificDateKey, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+      
+//       // If not found, try day name (legacy format)
+//       if (!schedule) {
+//         schedule = employee.workSchedule[dayName];
+//         // console.log('🕒 Fallback to day key (Object):', dayName, 'Result:', schedule ? 'FOUND' : 'NOT FOUND');
+//       }
+//     } else if (employee.legacyWorkSchedule) {
+//       // Fallback to legacy schedule if available
+//       schedule = employee.legacyWorkSchedule[dayName];
+//       // console.log('🕒 Using legacy schedule for:', dayName);
+//     }
+
+//     // console.log('Day of week:', dayOfWeek, 'Day name:', dayName);
+//     // console.log('🕒 FINAL Work schedule for this day:', schedule);
+//     // console.log('🕒 Schedule source:', schedule === employee.workSchedule?.[date] ? 'DATE-SPECIFIC ✅' : 'DAY-BASED ❌');
+
+//     if (!schedule || !schedule.isWorking) {
+//       // console.log('Employee not working on this day');
+//       return res.json({
+//         success: true,
+//         results: 0,
+//         data: { timeSlots: [] }
+//       });
+//     }
+
+//     // Generate time slots based on work schedule
+//     const timeSlots = generateTimeSlots(schedule, service.duration, date);
+//     // console.log('Generated time slots:', timeSlots.length);
+
+//     // Check for existing bookings and mark slots as unavailable
+//     const existingBookings = await Booking.find({
+//       employeeId: employeeId,
+//       date: date,
+//       status: { $in: ['confirmed', 'pending'] }
+//     });
+
+//     // console.log('Existing bookings:', existingBookings.length);
+
+//     const availableSlots = timeSlots.map(slot => {
+//       const isBooked = existingBookings.some(booking => {
+//         const bookingStart = new Date(booking.startTime);
+//         const bookingEnd = new Date(booking.endTime);
+//         const slotStart = new Date(slot.startTime);
+//         const slotEnd = new Date(slot.endTime);
+        
+//         return (slotStart < bookingEnd && slotEnd > bookingStart);
+//       });
+
+//       return {
+//         ...slot,
+//         available: !isBooked
+//       };
+//     }); 
+
+//     // console.log('Available slots:', availableSlots.length);
+
+//     res.json({
+//       success: true,                              
+//       results: availableSlots.length,
+//       data: { timeSlots: availableSlots }
+//     });
+//   } catch (error) {
+//     console.error('Error fetching available time slots:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch available time slots'
+//     });
+//   }
+// };
+
+// // Create booking confirmation (public)
+// const createBookingConfirmation = async (req, res) => {
+//   try {
+//     const { serviceId, employeeId, date, time, customerInfo } = req.body;
+
+//     // Validate required fields
+//     if (!serviceId || !employeeId || !date || !time || !customerInfo) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Service ID, employee ID, date, time, and customer info are required'
+//       });
+//     }
+
+//     // Create a temporary booking confirmation
+//     const confirmation = {
+//       serviceId,
+//       employeeId,
+//       date,
+//       time,
+//       customerInfo,
+//       confirmationId: generateConfirmationId(),
+//       expiresAt: new Date(Date.now() + 30 * 60 * 1000) // 30 minutes
+//     };
+
+//     // In a real app, you might save this to a temporary collection
+//     // For now, we'll just return the confirmation
+
+//     res.json({
+//       success: true,
+//       data: { confirmation }
+//     });
+//   } catch (error) {
+//     console.error('Error creating booking confirmation:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to create booking confirmation'
+//     });
+//   }
+// };
+
+// // ========================================
+// // AUTHENTICATED BOOKING CONTROLLERS
+// // ========================================
+
+// // Create booking (supports multiple services & professionals + gift card / membership payment)
+// const createBooking = async (req, res) => {
+//   try {
+//     console.log('\n\n');
+//     console.log('🎯'.repeat(40));
+//     console.log('🎯 CREATE BOOKING REQUEST RECEIVED - TIMESTAMP:', new Date().toISOString());
+//     console.log('🎯'.repeat(40));
+//     console.log('🔍 FULL REQUEST BODY RECEIVED:', JSON.stringify(req.body, null, 2));
+//     console.log('🔍 Request method:', req.method);
+//     console.log('🔍 Request path:', req.path);
+//     console.log('🔍 Request headers:', JSON.stringify(req.headers, null, 2));
+//     console.log('🎯'.repeat(40));
+//     console.log('\n\n');
+    
+//   let { 
+//     services: incomingServices, 
+//     appointmentDate, 
+//     notes, 
+//     paymentMethod, 
+//     client: clientData, 
+//     selectionMode, 
+//     paymentDetails: incomingPaymentDetails, 
+//     finalAmount: incomingFinalAmount, 
+//     customDiscount: incomingCustomDiscount,
+//     discountedTotal: incomingDiscountedTotal,
+//     giftCardCode,
+//     originalClientName,
+//     clientDisplayName,
+//     specialRequests,
+//     clientNotes,
+//     internalNotes
+//   } = req.body;
+
+//   console.log('🔍 CLIENT DATA DEBUG:', {
+//     clientData,
+//     originalClientName,
+//     clientDisplayName,
+//     hasClientData: !!clientData,
+//     clientDataType: typeof clientData,
+//     clientDataKeys: clientData ? Object.keys(clientData) : null
+//   });
+
+
+//     console.log('📊 VALIDATION START');
+//     console.log('✅ Services array:', {
+//       exists: !!incomingServices,
+//       isArray: Array.isArray(incomingServices),
+//       length: incomingServices?.length || 0,
+//       services: incomingServices
+//     });
+//     console.log('✅ Appointment date:', appointmentDate);
+
+//     if (!incomingServices || !Array.isArray(incomingServices) || incomingServices.length === 0) {
+//       console.error('❌ VALIDATION FAILED: Services missing or invalid');
+//       return res.status(400).json({ success: false, message: 'At least one service is required' });
+//     }
+//     if (!appointmentDate) {
+//       console.error('❌ VALIDATION FAILED: Appointment date missing');
+//       return res.status(400).json({ success: false, message: 'appointmentDate is required' });
+//     }
+//     console.log('✅ VALIDATION PASSED');
+//     console.log('='.repeat(80));
+//     // Normalize date (store midnight for day clarity)
+//     const apptDateObj = new Date(appointmentDate);
+//     if (isNaN(apptDateObj.getTime())) {
+//       return res.status(400).json({ success: false, message: 'Invalid appointmentDate' });
+//     }
+
+//     // Prepare day bounds for availability lookups
+//     const dayStart = new Date(apptDateObj); dayStart.setHours(0,0,0,0);
+//     const dayEnd = new Date(dayStart); dayEnd.setDate(dayEnd.getDate() + 1);
+
+//     // Find or create the client user
+//     let clientUser;
+//     if (clientData && clientData.email) {
+//       clientUser = await User.findOne({ email: clientData.email });
+
+//       if (!clientUser) {
+//         // Create a new user for the client
+//         let firstName = '';
+//         let lastName = '';
+//         if (clientData.name) {
+//           const parts = clientData.name.split(' ');
+//           firstName = parts[0];
+//           lastName = parts.slice(1).join(' ');
+//         } else {
+//           firstName = clientData.firstName || '';
+//           lastName = clientData.lastName || '';
+//         }
+
+//         // Clean phone number by removing spaces and non-digit characters (except +)
+//         const cleanPhone = clientData.phone ? clientData.phone.replace(/[^\d+]/g, '') : null;
+        
+//         clientUser = new User({
+//           firstName,
+//           lastName,
+//           email: clientData.email,
+//           phone: cleanPhone,
+//           password: 'defaultPassword123', // A temporary default password
+//           role: 'client',
+//           isVerified: true, // Or false, depending on your flow
+//         });
+//         await clientUser.save();
+//       }
+//     } else if (clientData && (clientData.name || clientData.firstName)) {
+//       // Handle client without email - create a temporary client with the provided name
+//       console.log('🔍 Creating client without email:', clientData.name || clientData.firstName);
+      
+//       let firstName = '';
+//       let lastName = '';
+//       if (clientData.name) {
+//         const parts = clientData.name.split(' ');
+//         firstName = parts[0];
+//         lastName = parts.slice(1).join(' ');
+//       } else {
+//         firstName = clientData.firstName || '';
+//         lastName = clientData.lastName || '';
+//       }
+
+//       // Create a unique temporary email to avoid conflicts
+//       const tempEmail = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}@example.com`;
+      
+//       // Clean phone number by removing spaces and non-digit characters (except +)
+//       const cleanPhone = clientData.phone ? clientData.phone.replace(/[^\d+]/g, '') : null;
+      
+//       clientUser = new User({
+//         firstName,
+//         lastName,
+//         email: tempEmail,
+//         phone: cleanPhone,
+//         password: 'defaultPassword123', // A temporary default password
+//         role: 'client',
+//         isEmailVerified: false, // Mark as not verified since it's a temp email
+//       });
+//       console.log('💾 Saving client to database...');
+//       await clientUser.save();
+//       console.log('✅ Created temporary client:', { id: clientUser._id, name: clientUser.fullName, email: clientUser.email });
+//     } else {
+//       // If no client data provided, use the current authenticated user as the client
+//       clientUser = req.user;
+//       console.log('🔍 Using authenticated user as client:', clientUser.fullName);
+//     }
+
+//     // Ensure we have a valid client
+//     if (!clientUser || !clientUser._id) {
+//       console.log('❌ Client validation failed:', { clientUser: !!clientUser, hasId: clientUser?._id });
+//       return res.status(400).json({ 
+//         message: 'Unable to determine client information. Please try logging in again.' 
+//       });
+//     }
+    
+//     console.log('✅ Client validated successfully:', { 
+//       id: clientUser._id, 
+//       name: clientUser.fullName || `${clientUser.firstName} ${clientUser.lastName}`,
+//       email: clientUser.email 
+//     });
+
+//     // Load all active employees once for potential auto-assignment ('any')
+//     const allActiveEmployees = await Employee.find({ isActive: true })
+//       .populate('user', 'firstName lastName')
+//       .select('user position employeeId specializations performance workSchedule');
+
+//     // Preload existing bookings for the day to avoid conflicts
+//     const existingDayBookings = await Booking.find({ appointmentDate: { $gte: dayStart, $lt: dayEnd } })
+//       .select('services.startTime services.endTime services.employee');
+//     const bookingsByEmployee = new Map();
+    
+//     // Helper function to normalize employee identifier for conflict checking
+//     const getEmployeeKey = (employee) => {
+//       if (!employee) return null;
+//       if (mongoose.Types.ObjectId.isValid(employee)) {
+//         return String(employee); // ObjectId format
+//       }
+//       if (typeof employee === 'string') {
+//         // String format (Python-created) - try to find matching employee ObjectId
+//         const matchingEmployee = allActiveEmployees.find(emp => {
+//           const empFullName = `${emp.user?.firstName || ''} ${emp.user?.lastName || ''}`.trim();
+//           return empFullName.toLowerCase() === employee.toLowerCase() ||
+//                  emp.user?.firstName?.toLowerCase() === employee.toLowerCase() ||
+//                  empFullName.toLowerCase().includes(employee.toLowerCase()) ||
+//                  employee.toLowerCase().includes(empFullName.toLowerCase());
+//         });
+//         return matchingEmployee ? String(matchingEmployee._id) : null;
+//       }
+//       return null;
+//     };
+    
+//     existingDayBookings.forEach(b => {
+//       (b.services || []).forEach(svc => {
+//         if (!svc.employee) return;
+//         const key = getEmployeeKey(svc.employee);
+//         if (!key) {
+//           console.log('⚠️ Could not determine employee key for conflict check:', svc.employee);
+//           return; // Skip if we can't determine the employee
+//         }
+//         if (!bookingsByEmployee.has(key)) bookingsByEmployee.set(key, []);
+//         bookingsByEmployee.get(key).push({ start: new Date(svc.startTime), end: new Date(svc.endTime) });
+//         console.log(`📅 Added existing booking for employee ${key}: ${new Date(svc.startTime)} - ${new Date(svc.endTime)}`);
+//       });
+//     });
+
+//     console.log(`🔍 Total existing bookings by employee:`, Array.from(bookingsByEmployee.entries()).map(([k, v]) => ({ employeeId: k, bookings: v.length })));
+
+//     const overlaps = (ranges, start, end) => ranges.some(r => start < r.end && end > r.start);
+//     const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+//     const isWorking = (employee, dateObj) => {
+//       const sched = employee.workSchedule?.[dayNames[dateObj.getDay()]];
+//       return sched && sched.isWorking;
+//     };
+
+//     // Transform each incoming service: validate service exists; override price & duration; validate/assign employee
+//     const transformedServices = [];
+//     for (const raw of incomingServices) {
+//       const serviceId = raw.service || raw.serviceId || raw._id;
+//       if (!serviceId) {
+//         return res.status(400).json({ success: false, message: 'Service id missing on one of the service entries' });
+//       }
+//       const serviceDoc = await Service.findById(serviceId).select('price duration name');
+//       if (!serviceDoc) {
+//         return res.status(404).json({ success: false, message: `Service not found: ${serviceId}` });
+//       }
+      
+//       console.log(`🔍 Processing service ${serviceDoc.name}:`, {
+//         rawStartTime: raw.startTime,
+//         rawEndTime: raw.endTime,
+//         rawEmployee: raw.employee
+//       });
+      
+//       // Determine start/end times (use provided or default sequential based on provided)
+//       let startTime = raw.startTime ? new Date(raw.startTime) : new Date(apptDateObj);
+//       if (isNaN(startTime.getTime())) startTime = new Date(apptDateObj);
+//       let endTime = raw.endTime ? new Date(raw.endTime) : new Date(startTime.getTime() + serviceDoc.duration * 60000);
+//       if (isNaN(endTime.getTime())) endTime = new Date(startTime.getTime() + serviceDoc.duration * 60000);
+//       if (endTime <= startTime) {
+//         endTime = new Date(startTime.getTime() + serviceDoc.duration * 60000);
+//       }
+
+//       console.log(`✅ Calculated times:`, {
+//         startTime: startTime.toISOString(),
+//         endTime: endTime.toISOString()
+//       });
+
+//       let employeeId = raw.employee || raw.employeeId; // expected field from frontend
+//       if (!employeeId || employeeId === 'any') {
+//         // Auto assign first available employee not overlapping
+//         const candidate = allActiveEmployees.find(emp => {
+//           if (!isWorking(emp, startTime)) return false;
+//           const existing = bookingsByEmployee.get(String(emp._id)) || [];
+//           return !overlaps(existing, startTime, endTime);
+//         });
+//         if (!candidate) {
+//           return res.status(409).json({ success: false, message: `No available professional for '${serviceDoc.name}' at selected time.` });
+//         }
+//         employeeId = candidate._id;
+//         if (!bookingsByEmployee.has(String(employeeId))) bookingsByEmployee.set(String(employeeId), []);
+//         bookingsByEmployee.get(String(employeeId)).push({ start: startTime, end: endTime });
+//       } else {
+//         // Validate employee exists
+//         const empDoc = allActiveEmployees.find(e => String(e._id) === String(employeeId));
+//         if (!empDoc) {
+//           return res.status(404).json({ success: false, message: `Employee not found or inactive: ${employeeId}` });
+//         }
+//         // Overlap check for this employee
+//         const existingRanges = bookingsByEmployee.get(String(employeeId)) || [];
+//         console.log(`🔍 Checking conflicts for employee ${employeeId}:`);
+//         console.log(`   New booking: ${startTime.toISOString()} - ${endTime.toISOString()}`);
+//         console.log(`   Existing bookings (${existingRanges.length}):`, existingRanges.map(r => ({
+//           start: r.start.toISOString(),
+//           end: r.end.toISOString()
+//         })));
+        
+//         if (overlaps(existingRanges, startTime, endTime)) {
+//           console.log(`❌ CONFLICT DETECTED for employee ${employeeId}`);
+//           console.log(`   Conflicting time range: ${startTime.toISOString()} to ${endTime.toISOString()}`);
+//           return res.status(409).json({ success: false, message: `Employee has a conflicting booking for service '${serviceDoc.name}'.` });
+//         }
+//         console.log(`✅ No conflict for employee ${employeeId}`);
+//         if (!bookingsByEmployee.has(String(employeeId))) bookingsByEmployee.set(String(employeeId), []);
+//         bookingsByEmployee.get(String(employeeId)).push({ start: startTime, end: endTime });
+//       }
+
+//       transformedServices.push({
+//         service: serviceDoc._id,
+//         employee: new mongoose.Types.ObjectId(employeeId), // Convert string to ObjectId for proper population
+//         price: serviceDoc.price,
+//         duration: serviceDoc.duration,
+//         startTime,
+//         endTime,
+//         notes: raw.notes || ''
+//       });
+//     }
+
+//     const totalAmount = transformedServices.reduce((sum, s) => sum + s.price, 0);
+//     const totalDuration = transformedServices.reduce((sum, s) => sum + s.duration, 0);
+
+//     // console.log('Creating booking (multi-service) client:', clientUser._id, 'services:', transformedServices.length, 'mode:', selectionMode);
+
+//     const newBooking = new Booking({
+//       client: clientUser._id,
+//       services: transformedServices,
+//       appointmentDate: apptDateObj,
+//       totalAmount,
+//       totalDuration,
+//       paymentMethod,
+//       status: 'confirmed',
+//       clientNotes: clientNotes || notes, // Use clientNotes if provided, fallback to notes
+//       internalNotes: internalNotes || `Original client: ${originalClientName || clientDisplayName || 'Unknown'}`,
+//       specialRequests: specialRequests || [], // Include special requests array
+//       bookedBy: clientUser._id,
+//     });
+
+//     // Attach payment details if provided (gift card, membership, etc.)
+//     if (incomingPaymentDetails && typeof incomingPaymentDetails === 'object') {
+//       newBooking.paymentDetails = { ...incomingPaymentDetails };
+//       console.log('💾 Payment details attached to booking:', newBooking.paymentDetails);
+//     }
+    
+//     // Handle custom discount from frontend
+//     if (typeof incomingCustomDiscount === 'number' && incomingCustomDiscount > 0) {
+//       newBooking.customDiscount = incomingCustomDiscount;
+//       console.log('💰 Custom discount applied:', incomingCustomDiscount);
+//     }
+//     if (typeof incomingDiscountedTotal === 'number') {
+//       newBooking.discountedTotal = incomingDiscountedTotal;
+//       console.log('💰 Discounted total set:', incomingDiscountedTotal);
+//     }
+//     if (typeof incomingFinalAmount === 'number') {
+//       newBooking.finalAmount = incomingFinalAmount;
+//       console.log('💰 Final amount set from request:', incomingFinalAmount);
+//     }
+//     if (giftCardCode && !newBooking.giftCardCode) {
+//       newBooking.giftCardCode = giftCardCode;
+//     }
+
+//     // Ensure finalAmount is set (pre-save will also calculate it, but set here for validation)
+//     // Skip recalculation if customDiscount is present - let pre-save hook handle it
+//     if (!newBooking.finalAmount && !newBooking.customDiscount) {
+//       newBooking.finalAmount = newBooking.totalAmount - (newBooking.discountAmount || 0) + (newBooking.taxAmount || 0);
+//     }
+
+//     // If gift card/membership details provided, adjust finalAmount prior to save for accuracy
+//     if (paymentMethod === 'giftcard' && newBooking.paymentDetails?.redeemAmount) {
+//       const redeem = Number(newBooking.paymentDetails.redeemAmount) || 0;
+//       newBooking.finalAmount = Math.max(0, newBooking.finalAmount - redeem);
+//     }
+//     if (paymentMethod === 'membership') {
+//       // Assume membership covers entire amount (adjust rules if partial later)
+//       newBooking.finalAmount = 0;
+//     }
+
+//     // Ensure bookingNumber is set (in case pre-save hook is not triggered)
+//     if (!newBooking.bookingNumber) {
+//       const date = new Date();
+//       const year = date.getFullYear().toString().slice(-2);
+//       const month = (date.getMonth() + 1).toString().padStart(2, '0');
+//       const day = date.getDate().toString().padStart(2, '0');
+      
+//       // Use timestamp to avoid race conditions
+//       const timestamp = Date.now().toString().slice(-6); // Last 6 digits of timestamp
+//       const randomSuffix = Math.floor(Math.random() * 99).toString().padStart(2, '0');
+      
+//       // Try with timestamp-based approach first
+//       let bookingNumber = `BK${year}${month}${day}${timestamp}${randomSuffix}`;
+      
+//       // Check if this exact number exists (very unlikely but just in case)
+//       const existingBooking = await Booking.findOne({ bookingNumber });
+//       if (existingBooking) {
+//         // Fallback to sequential approach with retry logic
+//         let attempts = 0;
+//         let sequence = 1;
+        
+//         while (attempts < 10) { // Max 10 attempts to avoid infinite loop
+//           try {
+//             const lastBooking = await Booking.findOne({
+//               bookingNumber: new RegExp(`^BK${year}${month}${day}`)
+//             }).sort({ bookingNumber: -1 });
+            
+//             if (lastBooking) {
+//               const lastSequence = parseInt(lastBooking.bookingNumber.slice(-4));
+//               if (!isNaN(lastSequence)) {
+//                 sequence = lastSequence + 1;
+//               }
+//             }
+            
+//             bookingNumber = `BK${year}${month}${day}${sequence.toString().padStart(4, '0')}`;
+            
+//             // Test if this number is available
+//             const testBooking = await Booking.findOne({ bookingNumber });
+//             if (!testBooking) {
+//               break; // Found available number
+//             }
+            
+//             sequence++; // Try next number
+//             attempts++;
+//           } catch (error) {
+//             console.error('Error in booking number generation attempt', attempts, error);
+//             attempts++;
+//           }
+//         }
+        
+//         if (attempts >= 10) {
+//           // Ultimate fallback: use timestamp
+//           bookingNumber = `BK${year}${month}${day}${Date.now().toString().slice(-4)}`;
+//         }
+//       }
+      
+//       newBooking.bookingNumber = bookingNumber;
+//       // console.log('Generated booking number:', bookingNumber);
+//     }
+
+//     await newBooking.save();
+
+//     // If membership payment: deduct session immediately
+//     // Handle both admin membership discounts and direct membership payments
+//     const membershipId = newBooking.paymentDetails?.membershipId || newBooking.paymentDetails?.adminMembership?.membershipId;
+//     const hasAdminMembership = !!newBooking.paymentDetails?.adminMembership;
+//     const hasMembershipPayment = paymentMethod === 'membership' && membershipId;
+    
+//     console.log('🔍 Membership detection check:', {
+//       paymentMethod,
+//       membershipId,
+//       hasAdminMembership,
+//       hasMembershipPayment,
+//       incomingPaymentDetails: incomingPaymentDetails,
+//       bookingPaymentDetails: newBooking.paymentDetails,
+//       shouldProcessMembership: hasMembershipPayment || hasAdminMembership
+//     });
+    
+//     if (hasMembershipPayment || hasAdminMembership) {
+//       try {
+//         const Membership = require('../models/Membership');
+//         const User = require('../models/User');
+        
+//         console.log('🔍 Processing membership session deduction:', {
+//           membershipId: membershipId,
+//           isAdminMembership: !!newBooking.paymentDetails?.adminMembership,
+//           bookingClient: newBooking.client,
+//           paymentDetails: newBooking.paymentDetails
+//         });
+        
+//         // Find the membership and verify it belongs to the client
+//         const membership = await Membership.findById(membershipId).populate('client');
+        
+//         if (membership) {
+//           console.log('📋 Found membership:', {
+//             membershipId: membership._id,
+//             membershipClient: membership.client,
+//             currentUsed: membership.usedSessions,
+//             remaining: membership.numberOfSessions - membership.usedSessions,
+//             status: membership.status
+//           });
+
+//           // Find the client from booking to compare
+//           let bookingClient = null;
+//           if (newBooking.client) {
+//             // newBooking.client is an ObjectId, so query by ID directly
+//             bookingClient = await User.findById(newBooking.client);
+//             console.log('🔍 Booking client lookup result:', bookingClient ? {
+//               id: bookingClient._id,
+//               email: bookingClient.email,
+//               name: `${bookingClient.firstName} ${bookingClient.lastName}`
+//             } : 'not found');
+//           }
+
+//           // Verify membership belongs to the booking client
+//           const clientMatch = bookingClient && membership.client && 
+//             (membership.client._id.toString() === bookingClient._id.toString());
+
+//           console.log('🔗 Client verification:', {
+//             membershipClientId: membership.client?._id?.toString(),
+//             bookingClientId: bookingClient?._id?.toString(),
+//             membershipClientEmail: membership.client?.email,
+//             bookingClientEmail: bookingClient?.email,
+//             clientMatch,
+//             membershipClient: membership.client ? {
+//               id: membership.client._id,
+//               name: `${membership.client.firstName} ${membership.client.lastName}`,
+//               email: membership.client.email
+//             } : null,
+//             bookingClient: bookingClient ? {
+//               id: bookingClient._id,
+//               name: `${bookingClient.firstName} ${bookingClient.lastName}`,
+//               email: bookingClient.email
+//             } : null
+//           });
+
+//           if (clientMatch) {
+//             console.log('🎯 Deducting session from verified membership - BEFORE:', {
+//               usedSessions: membership.usedSessions,
+//               remainingSessions: membership.numberOfSessions - membership.usedSessions,
+//               status: membership.status
+//             });
+            
+//             // Use the membership's useSession method to properly update
+//             try {
+//               const updateResult = await membership.useSession();
+//               console.log('💾 Membership save result:', updateResult ? 'SUCCESS' : 'FAILED');
+              
+//               // Reload the membership to verify the update
+//               const reloadedMembership = await Membership.findById(membership._id);
+//               console.log('🔄 Reloaded membership verification:', {
+//                 membershipId: reloadedMembership._id,
+//                 usedSessions: reloadedMembership.usedSessions,
+//                 remainingSessions: reloadedMembership.numberOfSessions - reloadedMembership.usedSessions,
+//                 status: reloadedMembership.status,
+//                 lastUsedDate: reloadedMembership.lastUsedDate
+//               });
+//             } catch (sessionError) {
+//               console.error('❌ Failed to deduct session:', sessionError);
+//             }
+            
+//             console.log('✅ Session deduction process completed');
+//           } else {
+//             console.warn('⚠️ Membership client mismatch - session NOT deducted:', {
+//               membershipClient: membership.client?.email,
+//               bookingClient: bookingClient?.email
+//             });
+//           }
+//         } else {
+//           console.warn('⚠️ Membership not found for session deduction:', membershipId);
+//         }
+//       } catch (membershipError) {
+//         console.error('❌ Error deducting membership session:', membershipError);
+//         // Don't fail the booking if membership session deduction fails
+//       }
+//     }
+
+//     // Handle gift card redemption - can be used alone or combined with other payment methods
+//     // Check both paymentMethod === 'giftcard' (full payment) and paymentDetails.giftCard (partial payment)
+//     const hasGiftCardPayment = paymentMethod === 'giftcard' || 
+//                                (newBooking.paymentDetails?.giftCard?.giftCardId) ||
+//                                giftCardCode;
+    
+//     if (hasGiftCardPayment) {
+//       try {
+//         const GiftCard = require('../models/GiftCard');
+//         let gc = null;
+        
+//         // Try to find gift card by ID from payment details first
+//         if (newBooking.paymentDetails?.giftCard?.giftCardId) {
+//           gc = await GiftCard.findById(newBooking.paymentDetails.giftCard.giftCardId);
+//           console.log('[BookingController] Gift card found by ID from paymentDetails.giftCard:', gc?.code);
+//         } else if (newBooking.paymentDetails?.giftCardId) {
+//           gc = await GiftCard.findById(newBooking.paymentDetails.giftCardId);
+//           console.log('[BookingController] Gift card found by ID from paymentDetails.giftCardId:', gc?.code);
+//         } else if (giftCardCode) {
+//           gc = await GiftCard.findOne({ code: giftCardCode.toUpperCase() });
+//           console.log('[BookingController] Gift card found by code:', gc?.code);
+//           if (gc) {
+//             newBooking.paymentDetails = newBooking.paymentDetails || {};
+//             newBooking.paymentDetails.giftCardId = gc._id;
+//             await newBooking.save();
+//           }
+//         }
+        
+//         if (gc) {
+//           console.log('[BookingController] Gift card found for redemption:', { 
+//             code: gc.code, 
+//             status: gc.status, 
+//             remainingValue: gc.remainingValue,
+//             paymentMethod,
+//             hasPaymentDetailsGiftCard: !!newBooking.paymentDetails?.giftCard
+//           });
+          
+//           // Skip if already fully used/expired/cancelled
+//           // Use 0.01 tolerance to handle floating point precision issues
+//           if (["Used","Expired","Cancelled"].includes(gc.status) || gc.remainingValue < 0.01) {
+//             console.warn('[BookingController] Gift card not usable (status or balance):', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue });
+//           } else {
+//             // Get redeem amount from paymentDetails.giftCard.redeemAmount or paymentDetails.redeemAmount
+//             const requestedRedeem = Number(newBooking.paymentDetails?.giftCard?.redeemAmount) || 
+//                                    Number(newBooking.paymentDetails?.redeemAmount) || 
+//                                    0;
+//             const maxAllowed = Math.min(gc.remainingValue, totalAmount);
+//             const redeemAmount = requestedRedeem > 0 ? Math.min(requestedRedeem, maxAllowed) : maxAllowed;
+            
+//             console.log('[BookingController] Redeem amount calculation:', { 
+//               requestedRedeem, 
+//               maxAllowed, 
+//               redeemAmount,
+//               totalAmount,
+//               gcRemainingValue: gc.remainingValue 
+//             });
+            
+//             if (redeemAmount > 0) {
+//               const result = await gc.useGiftCard(redeemAmount, clientUser._id, newBooking._id, 'Redeemed at booking creation');
+//               console.log('[BookingController] Gift card redemption result:', { code: gc.code, status: gc.status, remainingValue: gc.remainingValue, result });
+              
+//               // Reload gift card to verify status
+//               const reloadedGC = await GiftCard.findById(gc._id);
+//               console.log('[BookingController] Gift card after redemption:', { 
+//                 code: reloadedGC.code, 
+//                 status: reloadedGC.status, 
+//                 remainingValue: reloadedGC.remainingValue 
+//               });
+//             }
+//           }
+//         } else {
+//           console.warn('[BookingController] No gift card found for redemption despite hasGiftCardPayment=true');
+//         }
+//       } catch (gcErr) {
+//         console.error('[BookingController] Gift card redemption error (createBooking):', gcErr.message, gcErr.stack);
+//       }
+//     }
+
+//     // CREATE PAYMENT RECORD FOR THIS BOOKING
+//     console.log('='.repeat(80));
+//     console.log('💳 CREATING PAYMENT RECORD');
+//     console.log('='.repeat(80));
+//     try {
+//       const Payment = require('../models/Payment');
+      
+//       console.log('🔍 Payment method received:', paymentMethod);
+      
+//       // Map frontend payment methods to backend enum values
+//       // Payment model accepts: card, bank_transfer, digital_wallet, cash, giftcard, membership
+//       let mappedPaymentMethod = paymentMethod || 'cash';
+//       if (paymentMethod === 'upi' || paymentMethod === 'online') {
+//         mappedPaymentMethod = 'digital_wallet'; // Map UPI to digital_wallet
+//         console.log('✅ Mapping UPI/online to digital_wallet');
+//       }
+      
+//       // Determine payment gateway based on payment method
+//       // Payment model only accepts: stripe, paypal, square, adyen, payu, 2c2p, mercadopago, razorpay
+//       let gateway = 'stripe'; // Default gateway for card payments
+//       if (paymentMethod === 'cash' || paymentMethod === 'giftcard' || paymentMethod === 'membership') {
+//         gateway = 'square'; // Use square for manual/offline payments
+//       } else if (paymentMethod === 'upi' || paymentMethod === 'online') {
+//         gateway = 'razorpay'; // Use razorpay for UPI payments
+//       }
+      
+//       // Prepare metadata as Map of strings only (Payment model requirement)
+//       const metadata = new Map();
+//       metadata.set('bookingNumber', newBooking.bookingNumber);
+//       metadata.set('bookingId', newBooking._id.toString());
+//       metadata.set('totalServices', newBooking.services.length.toString());
+//       metadata.set('totalDuration', newBooking.totalDuration.toString());
+      
+//       // Add first service details (metadata must be string values)
+//       if (newBooking.services.length > 0) {
+//         const firstService = newBooking.services[0];
+//         metadata.set('primaryService', firstService.serviceName || 'Unknown Service');
+//         metadata.set('primaryServicePrice', (firstService.price || 0).toString());
+//       }
+      
+//       // Store original payment method for reference
+//       metadata.set('originalPaymentMethod', paymentMethod || 'cash');
+      
+//       console.log('💳 Payment record data:', {
+//         user: clientUser._id,
+//         booking: newBooking._id,
+//         amount: newBooking.finalAmount || totalAmount,
+//         currency: 'AED',
+//         originalPaymentMethod: paymentMethod,
+//         mappedPaymentMethod: mappedPaymentMethod,
+//         paymentGateway: gateway,
+//         bookingNumber: newBooking.bookingNumber
+//       });
+      
+//       const paymentRecord = new Payment({
+//         user: clientUser._id,
+//         booking: newBooking._id,
+//         amount: newBooking.finalAmount || totalAmount,
+//         currency: 'AED',
+//         paymentMethod: mappedPaymentMethod,
+//         paymentGateway: gateway,
+//         status: 'pending', // Start as pending, will be marked completed when booking is completed
+//         gatewayTransactionId: `TXN-${newBooking.bookingNumber}-${Date.now()}`,
+//         metadata: metadata
+//       });
+
+//       console.log('💾 Saving payment record to database...');
+//       await paymentRecord.save();
+//       console.log('✅ Payment record created successfully:', {
+//         id: paymentRecord._id,
+//         amount: paymentRecord.amount,
+//         method: paymentRecord.paymentMethod,
+//         gateway: paymentRecord.paymentGateway,
+//         status: paymentRecord.status,
+//         bookingNumber: newBooking.bookingNumber,
+//         transactionId: paymentRecord.gatewayTransactionId,
+//         createdAt: paymentRecord.createdAt
+//       });
+//       console.log('='.repeat(80));
+//     } catch (paymentErr) {
+//       console.error('='.repeat(80));
+//       console.error('❌ FAILED TO CREATE PAYMENT RECORD');
+//       console.error('Error details:', paymentErr);
+//       console.error('Error message:', paymentErr.message);
+//       console.error('Error stack:', paymentErr.stack);
+//       console.error('='.repeat(80));
+//       // Don't fail the booking if payment record creation fails
+//     }
+
+//     const populatedBooking = await Booking.findById(newBooking._id)
+//       .populate('client', 'firstName lastName email phone')
+//       .populate({
+//         path: 'services.service',
+//         model: 'Service',
+//       })
+//       .populate({
+//         path: 'services.employee',
+//         model: 'Employee',
+//         populate: {
+//           path: 'user',
+//           model: 'User',
+//           select: 'firstName lastName',
+//         },
+//       });
+
+//     // Update the newBooking with populated client for email sending
+//     if (populatedBooking && populatedBooking.client && populatedBooking.client.email) {
+//       // Send booking confirmation email with populated booking
+//       try {
+//         const emailService = new EmailService();
+        
+//         // Prepare payment info for email
+//         const paymentInfo = {
+//           amount: populatedBooking.finalAmount * 100 // Convert to cents for email service
+//         };
+        
+//         console.log('📧 Sending booking confirmation email to:', populatedBooking.client.email);
+//         const emailResult = await emailService.sendBookingConfirmation(populatedBooking, paymentInfo);
+//         console.log('✅ Booking confirmation email sent:', emailResult.success ? 'SUCCESS' : 'FAILED');
+//       } catch (emailError) {
+//         console.error('❌ Failed to send booking confirmation email:', emailError);
+//         // Don't fail the booking if email fails
+//       }
+//     }
+
+//     res.status(201).json({
+//       success: true,
+//       message: 'Booking created successfully',
+//       data: { booking: populatedBooking },
+//     });
+//   } catch (error) {
+//     console.error('Error creating booking:', error);
+//     res.status(500).json({ message: 'Server error: ' + error.message });
+//   }
+// };
+
+// // Get user's bookings
+// const getUserBookings = async (req, res) => {
+//   try {
+//     const userId = req.user._id;
+//     const bookings = await Booking.find({ client: userId })
+//       .populate('services.service', 'name price duration')
+//       .populate({
+//         path: 'services.employee',
+//         model: 'Employee',
+//         select: 'user position employeeId',
+//         populate: {
+//           path: 'user',
+//           model: 'User',
+//           select: 'firstName lastName email'
+//         }
+//       })
+//       .sort({ appointmentDate: -1 });
+
+//     res.json({
+//       success: true,
+//       results: bookings.length,
+//       data: { bookings }
+//     });
+//   } catch (error) {
+//     console.error('Error fetching user bookings:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch bookings'
+//     });
+//   }
+// };
+
+// // Get specific booking
+// const getBooking = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const userId = req.user._id;
+
+//     const booking = await Booking.findOne({ _id: id, client: userId })
+//       .populate('services.service', 'name price duration')
+//       .populate('services.employee', 'user position');
+
+//     if (!booking) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Booking not found'
+//       });
+//     }
+
+//     res.json({
+//       success: true,
+//       data: { booking }
+//     });
+//   } catch (error) {
+//     console.error('Error fetching booking:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch booking'
+//     });
+//   }
+// };
+
+// // Cancel booking
+// const cancelBooking = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const userId = req.user._id;
+
+//     // Get the booking first to check payment method before cancelling
+//     const bookingToCancel = await Booking.findOne({ _id: id, client: userId });
+    
+//     if (!bookingToCancel) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Booking not found'
+//       });
+//     }
+
+//     const booking = await Booking.findOneAndUpdate(
+//       { _id: id, client: userId },
+//       { status: 'cancelled' },
+//       { new: true }
+//     );
+
+//     // If membership payment: refund session back to membership
+//     if (bookingToCancel.paymentMethod === 'membership' && bookingToCancel.paymentDetails?.membershipId) {
+//       try {
+//         const Membership = require('../models/Membership');
+//         const membership = await Membership.findById(bookingToCancel.paymentDetails.membershipId);
+        
+//         if (membership && membership.usedSessions > 0) {
+//           console.log('🔄 Refunding session to membership due to cancellation:', {
+//             membershipId: membership._id,
+//             currentUsed: membership.usedSessions
+//           });
+
+//           // Refund the session
+//           membership.usedSessions -= 1;
+          
+//           // Update status if needed
+//           if (membership.status === 'Used' && membership.usedSessions < membership.numberOfSessions) {
+//             membership.status = membership.usedSessions > 0 ? 'Partially Used' : 'Active';
+//           }
+          
+//           await membership.save();
+          
+//           console.log('✅ Session refunded successfully:', {
+//             membershipId: membership._id,
+//             newUsed: membership.usedSessions,
+//             remaining: membership.numberOfSessions - membership.usedSessions,
+//             status: membership.status
+//           });
+//         }
+//       } catch (membershipError) {
+//         console.error('❌ Error refunding membership session:', membershipError);
+//         // Don't fail the cancellation if membership refund fails
+//       }
+//     }
+
+//     res.json({
+//       success: true,
+//       data: { booking }
+//     });
+//   } catch (error) {
+//     console.error('Error cancelling booking:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to cancel booking'
+//     });
+//   }
+// };
+
+// // Reschedule booking
+// const rescheduleBooking = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { newDateTime } = req.body;
+//     const userId = req.user._id;
+
+//     const booking = await Booking.findOneAndUpdate(
+//       { _id: id, client: userId },
+//       { 
+//         date: new Date(newDateTime),
+//         startTime: new Date(newDateTime),
+//         endTime: new Date(new Date(newDateTime).getTime() + 60 * 60 * 1000) // Add 1 hour
+//       },
+//       { new: true }
+//     );
+
+//   if (!booking) {
+//     return res.status(404).json({
+//       success: false,
+//         message: 'Booking not found'
+//       });
+//     }
+
+//     res.json({
+//       success: true,
+//       data: { booking }
+//     });
+//   } catch (error) {
+//     console.error('Error rescheduling booking:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to reschedule booking'
+//     });
+//   }
+// };
+
+// // Complete booking after authentication
+// const completeBooking = async (req, res) => {
+//   try {
+//     const { confirmationId } = req.body;
+//     const userId = req.user._id;
+
+//     // In a real app, you would validate the confirmation and create the actual booking
+//     // For now, we'll just return success
+
+//     res.json({
+//     success: true,
+//       message: 'Booking completed successfully'
+//     });
+//   } catch (error) {
+//     console.error('Error completing booking:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to complete booking'
+//     });
+//   }
+// };
+
+// // ========================================
+// // ADMIN BOOKING CONTROLLERS
+// // ========================================
+
+// // Get all bookings (admin only) - WITH PAGINATION
+// const getAllBookings = async (req, res) => {
+//   console.log('🚀 UPDATED CODE LOADED - VERSION 2024-10-22-v3');
+//   try {
+//     const { startDate, endDate, page = 1, limit = 50 } = req.query;
+    
+//     // Convert pagination params to numbers
+//     const pageNum = Math.max(1, parseInt(page));
+//     const limitNum = Math.min(1000, Math.max(1, parseInt(limit))); // Max 1000 per page
+//     const skip = (pageNum - 1) * limitNum;
+    
+//     console.log('📅 Request params:', { startDate, endDate, page: pageNum, limit: limitNum, skip });
+    
+//     // Build the query filter - TIMEZONE FIX: Use simple date comparison
+//     let dateFilter = {};
+    
+//     if (startDate || endDate) {
+//       // Use appointmentDate for filtering since it represents the intended booking date
+//       dateFilter['appointmentDate'] = {};
+      
+//       if (startDate) {
+//         // Parse as UTC to avoid timezone conversion
+//         const startDateObj = new Date(`${startDate}T00:00:00.000Z`);
+//         dateFilter['appointmentDate'].$gte = startDateObj;
+//       }
+      
+//       if (endDate) {
+//         // Parse as UTC and set to end of day
+//         const endDateObj = new Date(`${endDate}T23:59:59.999Z`);
+//         dateFilter['appointmentDate'].$lte = endDateObj;
+//       }
+//     }
+    
+//     console.log('📋 Filter applied:', JSON.stringify(dateFilter, null, 2));
+    
+//     // Get total count for pagination (fast with indexes)
+//     const totalCount = await Booking.countDocuments(dateFilter);
+//     console.log(`📊 Total bookings: ${totalCount}`);
+    
+//     // Fetch bookings with pagination - OPTIMIZED
+//     // Use lean() FIRST to get raw data, then we'll manually populate to avoid cast errors
+//     const bookings = await Booking.find(dateFilter)
+//       .lean() // Use lean for better performance and to avoid auto-population errors
+//       .sort({ appointmentDate: -1 })
+//       .skip(skip)
+//       .limit(limitNum);
+
+//     console.log(`🔍 Fetched ${bookings.length} bookings with pagination (raw data, will populate manually)`);
+    
+//     // Collect all unpopulated IDs upfront for batch fetching
+//     const unpopulatedClientIds = new Set();
+//     const unpopulatedServiceIds = new Set();
+//     const unpopulatedEmployeeIds = new Set();
+
+//     bookings.forEach(booking => {
+//       // Helper function to validate and add ObjectId with try-catch
+//       const isValidObjectId = (id) => {
+//         const idStr = String(id);
+//         // Must be exactly 24 hex characters
+//         if (idStr.length !== 24) return false;
+//         if (!/^[0-9a-fA-F]{24}$/.test(idStr)) return false;
+        
+//         // Try to actually create an ObjectId - this is the safest check
+//         try {
+//           new mongoose.Types.ObjectId(idStr);
+//           return true;
+//         } catch (e) {
+//           return false;
+//         }
+//       };
+      
+//       // Check client - only add if it's a valid ObjectId
+//       if (booking.client && typeof booking.client !== 'object') {
+//         const clientId = String(booking.client);
+//         if (isValidObjectId(clientId)) {
+//           unpopulatedClientIds.add(clientId);
+//         } else {
+//           console.log(`⚠️ Skipping invalid client ID: "${clientId}"`);
+//         }
+//       } else if (booking.client && typeof booking.client === 'object' && !booking.client.firstName) {
+//         const clientId = String(booking.client._id || booking.client);
+//         if (isValidObjectId(clientId)) {
+//           unpopulatedClientIds.add(clientId);
+//         } else {
+//           console.log(`⚠️ Skipping invalid client ID from object: "${clientId}"`);
+//         }
+//       }
+
+//       // Check services - only add if valid ObjectId
+//       if (booking.services) {
+//         booking.services.forEach(service => {
+//           if (service.service && typeof service.service !== 'object') {
+//             const serviceId = String(service.service);
+//             if (isValidObjectId(serviceId)) {
+//               unpopulatedServiceIds.add(serviceId);
+//             }
+//           } else if (service.service && typeof service.service === 'object' && !service.service.name) {
+//             const serviceId = String(service.service._id || service.service);
+//             if (isValidObjectId(serviceId)) {
+//               unpopulatedServiceIds.add(serviceId);
+//             }
+//           }
+
+//           if (service.employee && typeof service.employee !== 'object') {
+//             const employeeId = String(service.employee);
+//             if (isValidObjectId(employeeId)) {
+//               unpopulatedEmployeeIds.add(employeeId);
+//             }
+//           } else if (service.employee && typeof service.employee === 'object' && !service.employee.user) {
+//             const employeeId = String(service.employee._id || service.employee);
+//             if (isValidObjectId(employeeId)) {
+//               unpopulatedEmployeeIds.add(employeeId);
+//             }
+//           }
+//         });
+//       }
+//     });
+
+//     console.log(`✅ Validation complete. Collected valid IDs: ${unpopulatedClientIds.size} clients, ${unpopulatedServiceIds.size} services, ${unpopulatedEmployeeIds.size} employees`);
+
+//     // DEBUG: Log the actual IDs being used
+//     if (unpopulatedClientIds.size > 0) {
+//       console.log('📋 Client IDs to fetch:', Array.from(unpopulatedClientIds).slice(0, 5));
+//     }
+
+//     // Batch fetch all unpopulated data
+//     console.log(`📦 Batch fetching: ${unpopulatedClientIds.size} clients, ${unpopulatedServiceIds.size} services, ${unpopulatedEmployeeIds.size} employees`);
+    
+//     let clientsMap = new Map();
+//     let servicesMap = new Map();
+//     let employeesMap = new Map();
+    
+//     try {
+//       // Fetch clients
+//       if (unpopulatedClientIds.size > 0) {
+//         console.log('📦 Fetching clients...');
+//         const clientDocs = await User.find({ _id: { $in: Array.from(unpopulatedClientIds) } })
+//           .select('firstName lastName email')
+//           .lean();
+//         clientsMap = new Map(clientDocs.map(d => [String(d._id), d]));
+//         console.log(`✅ Fetched ${clientsMap.size} clients`);
+//       }
+      
+//       // Fetch services
+//       if (unpopulatedServiceIds.size > 0) {
+//         console.log('📦 Fetching services...');
+//         const serviceDocs = await Service.find({ _id: { $in: Array.from(unpopulatedServiceIds) } })
+//           .select('name price duration')
+//           .lean();
+//         servicesMap = new Map(serviceDocs.map(d => [String(d._id), d]));
+//         console.log(`✅ Fetched ${servicesMap.size} services`);
+//       }
+      
+//       // Fetch employees
+//       if (unpopulatedEmployeeIds.size > 0) {
+//         console.log('📦 Fetching employees...');
+//         const employeeDocs = await Employee.find({ _id: { $in: Array.from(unpopulatedEmployeeIds) } })
+//           .populate('user', 'firstName lastName email')
+//           .lean();
+//         employeesMap = new Map(employeeDocs.map(d => [String(d._id), d]));
+//         console.log(`✅ Fetched ${employeesMap.size} employees`);
+//       }
+      
+//       console.log(`✅ Batch fetch complete: ${clientsMap.size} clients, ${servicesMap.size} services, ${employeesMap.size} employees loaded`);
+//     } catch (batchError) {
+//       console.error('❌ Error during batch fetch:', batchError);
+//       console.error('Stack:', batchError.stack);
+//       // Continue with empty maps - better to show some data than crash
+//     }
+    
+//     // Process bookings using the fetched data maps
+//     const processedBookings = bookings.map((booking, index) => {
+//       try {
+//       // Normalize client data
+//       if (booking.client && typeof booking.client === 'object' && booking.client.firstName !== undefined) {
+//         // Client is properly populated
+//         booking.client = {
+//           _id: booking.client._id,
+//           firstName: booking.client.firstName || '',
+//           lastName: booking.client.lastName || '',
+//           email: booking.client.email || '',
+//           fullName: `${booking.client.firstName || ''} ${booking.client.lastName || ''}`.trim() || 'Unknown Client'
+//         };
+//       } else {
+//         // Look up in batch-fetched map
+//         const clientId = String(booking.client?._id || booking.client);
+//         const clientDoc = clientsMap.get(clientId);
+//         if (clientDoc) {
+//           booking.client = {
+//             _id: clientDoc._id,
+//             firstName: clientDoc.firstName || '',
+//             lastName: clientDoc.lastName || '',
+//             email: clientDoc.email || '',
+//             fullName: `${clientDoc.firstName || ''} ${clientDoc.lastName || ''}`.trim() || 'Unknown Client'
+//           };
+//         } else {
+//           // Use original client value as firstName if it's a string (legacy data)
+//           const originalClientValue = String(booking.client || 'Unknown');
+//           booking.client = {
+//             _id: '000000000000000000000000', // Placeholder ObjectId for invalid data
+//             firstName: originalClientValue.length < 50 ? originalClientValue : 'Unknown',
+//             lastName: 'Client',
+//             email: '',
+//             fullName: originalClientValue.length < 50 ? originalClientValue : 'Unknown Client'
+//           };
+//         }
+//       }
+
+//       // Normalize services data using batch-fetched maps
+//       if (booking.services) {
+//         booking.services = booking.services.map((service) => {
+//           // Normalize service
+//           if (service.service && typeof service.service === 'object' && service.service.name) {
+//             // Already populated
+//             service.service = {
+//               _id: service.service._id,
+//               name: service.service.name || 'Unknown Service',
+//               price: service.service.price || service.price || 0,
+//               duration: service.service.duration || service.duration || 0
+//             };
+//           } else {
+//             // Look up in batch-fetched map
+//             const serviceId = String(service.service?._id || service.service);
+//             const serviceDoc = servicesMap.get(serviceId);
+//             if (serviceDoc) {
+//               service.service = {
+//                 _id: serviceDoc._id,
+//                 name: serviceDoc.name || 'Unknown Service',
+//                 price: serviceDoc.price || service.price || 0,
+//                 duration: serviceDoc.duration || service.duration || 0
+//               };
+//             } else {
+//               // Use original service value as name if it's a string (legacy data)
+//               const originalServiceValue = String(service.service || 'Unknown');
+//               service.service = {
+//                 _id: '000000000000000000000000', // Placeholder ObjectId
+//                 name: originalServiceValue.length < 100 ? originalServiceValue : 'Unknown Service',
+//                 price: service.price || 0,
+//                 duration: service.duration || 0
+//               };
+//             }
+//           }
+
+//           // Normalize employee
+//           if (service.employee && typeof service.employee === 'object' && service.employee.user) {
+//             // Already populated with user
+//             service.employee.fullName = `${service.employee.user.firstName || ''} ${service.employee.user.lastName || ''}`.trim() || 'Unknown Employee';
+//           } else {
+//             // Look up in batch-fetched map
+//             const employeeId = String(service.employee?._id || service.employee);
+//             const employeeDoc = employeesMap.get(employeeId);
+//             if (employeeDoc && employeeDoc.user) {
+//               service.employee = {
+//                 _id: employeeDoc._id,
+//                 employeeId: employeeDoc.employeeId,
+//                 fullName: `${employeeDoc.user.firstName || ''} ${employeeDoc.user.lastName || ''}`.trim() || 'Unknown Employee',
+//                 user: {
+//                   firstName: employeeDoc.user.firstName || '',
+//                   lastName: employeeDoc.user.lastName || '',
+//                   email: employeeDoc.user.email || ''
+//                 }
+//               };
+//             } else {
+//               // Use original employee value as name if it's a string (legacy data)
+//               const originalEmployeeValue = String(service.employee || 'Unknown');
+//               service.employee = {
+//                 _id: '000000000000000000000000', // Placeholder ObjectId
+//                 employeeId: null,
+//                 fullName: originalEmployeeValue.length < 100 ? originalEmployeeValue : 'Unknown Employee',
+//                 user: {
+//                   firstName: originalEmployeeValue.length < 100 ? originalEmployeeValue : 'Unknown',
+//                   lastName: 'Employee',
+//                   email: ''
+//                 }
+//               };
+//             }
+//           }
+
+//           return service;
+//         });
+//       }
+
+//       return booking;
+//       } catch (processingError) {
+//         console.error(`❌ Error processing booking at index ${index}:`, processingError);
+//         console.error('Booking data:', booking);
+//         // Return the booking with minimal data to avoid breaking the entire response
+//         return {
+//           ...booking,
+//           client: booking.client || { fullName: 'Error Loading Client' },
+//           services: booking.services || []
+//         };
+//       }
+//     });
+
+//     console.log(`✅ Processed bookings: ${processedBookings.length}`);
+//     if (processedBookings.length > 0) {
+//       console.log('📝 Sample processed booking:', JSON.stringify(processedBookings[0], null, 2));
+//     }
+    
+//     // Calculate pagination metadata
+//     const totalPages = Math.ceil(totalCount / limitNum);
+//     const pagination = {
+//       page: pageNum,
+//       limit: limitNum,
+//       total: totalCount,
+//       pages: totalPages,
+//       hasNextPage: pageNum < totalPages,
+//       hasPrevPage: pageNum > 1
+//     };
+    
+//     console.log('📊 Pagination:', pagination);
+
+//     res.json({
+//       success: true,
+//       results: processedBookings.length,
+//       data: { 
+//         bookings: processedBookings,
+//         pagination 
+//       }
+//     });
+//   } catch (error) {
+//     console.error('❌ Error fetching all bookings:', error);
+//     console.error('❌ Stack trace:', error.stack);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to fetch bookings',
+//       error: error.message
+//     });
+//   }
+// };
+
+// // Update booking (admin only)
+// const updateBooking = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const updateData = req.body;
+//     const prevBooking = await Booking.findById(id).select('paymentMethod paymentDetails finalAmount status');
+//     const booking = await Booking.findByIdAndUpdate(id, updateData, { new: true });
+
+//     if (!booking) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Booking not found'
+//       });
+//     }
+
+//     // Gift card forfeiture on no-show: if booking transitions to no-show and was giftcard paid but gift card not yet fully consumed
+//     if (prevBooking && updateData.status === 'no-show' && prevBooking.status !== 'no-show' && prevBooking.paymentMethod === 'giftcard') {
+//       try {
+//         const giftCardId = prevBooking.paymentDetails?.giftCardId;
+//         const redeemAmount = prevBooking.paymentDetails?.redeemAmount || prevBooking.finalAmount || 0;
+//         if (giftCardId && redeemAmount > 0) {
+//           const GiftCard = require('../models/GiftCard');
+//           const gc = await GiftCard.findById(giftCardId);
+//           if (gc && gc.remainingValue > 0.01) {
+//             const amountToUse = Math.min(redeemAmount, gc.remainingValue);
+//             // Directly adjust remaining value (forfeiture) and push history entry
+//             gc.usageHistory.push({
+//               amountUsed: amountToUse,
+//               usedBy: booking.client,
+//               bookingId: booking._id,
+//               notes: 'Auto-forfeited due to no-show'
+//             });
+//             gc.remainingValue -= amountToUse;
+//             // Round to 2 decimal places
+//             gc.remainingValue = Math.round(gc.remainingValue * 100) / 100;
+//             if (gc.remainingValue < 0.01) {
+//               gc.remainingValue = 0;
+//               gc.status = 'Used';
+//             } else if (gc.remainingValue < gc.value) {
+//               gc.status = 'Partially Used';
+//             }
+//             await gc.save();
+//           }
+//         }
+//       } catch (giftErr) {
+//         console.error('Gift card forfeiture error (booking update):', giftErr.message);
+//       }
+//     }
+
+//     // Update payment status to 'completed' when booking status changes to 'completed'
+//     if (updateData.status === 'completed') {
+//       try {
+//         const Payment = require('../models/Payment');
+//         const paymentUpdate = await Payment.updateOne(
+//           { booking: id, status: 'pending' },
+//           { 
+//             $set: { 
+//               status: 'completed',
+//               processedAt: new Date()
+//             } 
+//           }
+//         );
+//         if (paymentUpdate.modifiedCount > 0) {
+//           console.log(`✅ Payment marked as completed for booking ${id}`);
+//         }
+//       } catch (paymentErr) {
+//         console.error('Payment status update error:', paymentErr.message);
+//         // Don't fail the booking update if payment update fails
+//       }
+//     }
+
+//     res.json({
+//     success: true,
+//       data: { booking }
+//     });
+//   } catch (error) {
+//     console.error('Error updating booking:', error);
+//     res.status(500).json({
+//       success: false,
+//       message: 'Failed to update booking'
+//     });
+//   }
+// };
+
+// // Update single service status within a booking
+// const updateServiceStatus = async (req, res) => {
+//   try {
+//     const { bookingId, serviceId } = req.params;
+//     let { status } = req.body;
+//     if (!status) return res.status(400).json({ success: false, message: 'Status is required' });
+
+//     // Map extended statuses to service-level statuses
+//     const statusMap = {
+//       booked: 'scheduled',
+//       pending: 'scheduled',
+//       confirmed: 'confirmed',  // Keep confirmed as distinct status
+//       arrived: 'arrived',      // Keep arrived as distinct status  
+//       started: 'in-progress',
+//       'in-progress': 'in-progress',
+//       completed: 'completed',
+//       cancelled: 'cancelled',
+//       'no-show': 'no-show'
+//     };
+//     const serviceStatus = statusMap[status] || status;
+//     const allowed = ['scheduled','confirmed','arrived','in-progress','completed','cancelled','no-show'];
+//     if (!allowed.includes(serviceStatus)) {
+//       return res.status(400).json({ success: false, message: 'Invalid service status' });
+//     }
+
+//     const booking = await Booking.findById(bookingId);
+//     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+
+//     const svc = booking.services.id(serviceId);
+//     if (!svc) return res.status(404).json({ success: false, message: 'Service not found in booking' });
+
+//     svc.status = serviceStatus;
+
+//     // UPDATE OVERALL BOOKING STATUS BASED ON SERVICE STATUSES
+//     const serviceCounts = {
+//       scheduled: 0,
+//       confirmed: 0,
+//       arrived: 0,
+//       'in-progress': 0,
+//       completed: 0,
+//       cancelled: 0,
+//       'no-show': 0
+//     };
+
+//     // Count statuses of all services
+//     booking.services.forEach(service => {
+//       const status = service.status || 'scheduled';
+//       if (serviceCounts.hasOwnProperty(status)) {
+//         serviceCounts[status]++;
+//       }
+//     });
+
+//     const totalServices = booking.services.length;
+    
+//     // Determine overall booking status based on service statuses
+//     // Map service-level statuses to valid booking-level statuses
+//     const previousBookingStatus = booking.status;
+    
+//     if (serviceCounts.completed === totalServices) {
+//       // All services completed
+//       booking.status = 'completed';
+//     } else if (serviceCounts['no-show'] === totalServices) {
+//       // All services no-show
+//       booking.status = 'no-show';
+//     } else if (serviceCounts.cancelled === totalServices) {
+//       // All services cancelled
+//       booking.status = 'cancelled';
+//     } else if (serviceCounts['in-progress'] > 0) {
+//       // At least one service in progress
+//       booking.status = 'started';  // Use 'started' instead of 'in-progress'
+//     } else if (serviceCounts.completed > 0) {
+//       // Some services completed, but not all
+//       booking.status = 'started';  // Use 'started' instead of 'in-progress'
+//     } else if (serviceCounts.arrived > 0) {
+//       // At least one service arrived - map to booking 'arrived'
+//       booking.status = 'arrived';
+//     } else if (serviceCounts.confirmed > 0) {
+//       // At least one service confirmed - map to booking 'confirmed'  
+//       booking.status = 'confirmed';
+//     } else {
+//       // Default to booked if all services are scheduled
+//       booking.status = 'booked';  // Use 'booked' instead of 'scheduled'
+//     }
+
+//     // console.log(`📊 Booking ${booking._id} status updated to: ${booking.status} (based on service statuses)`);
+
+//     await booking.save();
+
+//     // 🔄 Update payment status when booking is completed
+//     if (booking.status === 'completed' && previousBookingStatus !== 'completed') {
+//       try {
+//         const Payment = require('../models/Payment');
+//         const payment = await Payment.findOne({ booking: booking._id });
+        
+//         if (payment && payment.status !== 'completed' && payment.status !== 'refunded') {
+//           console.log(`💳 Updating payment status to 'completed' for booking ${booking._id}`);
+//           payment.status = 'completed';
+//           await payment.save();
+//         }
+//       } catch (paymentErr) {
+//         console.error('⚠️ Failed to update payment status:', paymentErr);
+//         // Don't fail the whole operation if payment update fails
+//       }
+//     }
+
+//     // If all services now no-show and booking was giftcard, auto-forfeit
+//     if (serviceStatus === 'no-show') {
+//       const allNoShow = booking.services.every(s => s.status === 'no-show');
+//       if (allNoShow && booking.paymentMethod === 'giftcard') {
+//         try {
+//           const giftCardId = booking.paymentDetails?.giftCardId;
+//           const redeemAmount = booking.paymentDetails?.redeemAmount || booking.finalAmount || 0;
+//           if (giftCardId && redeemAmount > 0) {
+//             const GiftCard = require('../models/GiftCard');
+//             const gc = await GiftCard.findById(giftCardId);
+//             if (gc && gc.remainingValue > 0.01) {
+//               const amountToUse = Math.min(redeemAmount, gc.remainingValue);
+//               gc.usageHistory.push({
+//                 amountUsed: amountToUse,
+//                 usedBy: booking.client,
+//                 bookingId: booking._id,
+//                 notes: 'Auto-forfeited due to no-show (service-level)'
+//               });
+//               gc.remainingValue -= amountToUse;
+//               // Round to 2 decimal places
+//               gc.remainingValue = Math.round(gc.remainingValue * 100) / 100;
+//               if (gc.remainingValue < 0.01) { gc.remainingValue = 0; gc.status = 'Used'; } else if (gc.remainingValue < gc.value) gc.status = 'Partially Used';
+//               await gc.save();
+//             }
+//           }
+//         } catch (giftErr) {
+//           console.error('Gift card forfeiture error (service update):', giftErr.message);
+//         }
+//       }
+//     }
+
+//     return res.json({ success: true, message: 'Service status updated', data: { bookingId, serviceId, status: serviceStatus } });
+//   } catch (error) {
+//     console.error('Error updating service status:', error);
+//     res.status(500).json({ success: false, message: 'Failed to update service status' });
+//   }
+// };
+
+// // Delete single service from booking
+// const deleteServiceFromBooking = async (req, res) => {
+//   try {
+//     const { bookingId, serviceId } = req.params;
+//     const booking = await Booking.findById(bookingId);
+//     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+
+//     const originalLen = booking.services.length;
+//     booking.services = booking.services.filter(s => String(s._id) !== String(serviceId));
+//     if (booking.services.length === originalLen) {
+//       return res.status(404).json({ success: false, message: 'Service not found in booking' });
+//     }
+
+//     if (booking.services.length === 0) {
+//       await Booking.findByIdAndDelete(bookingId);
+//       return res.json({ success: true, message: 'Service deleted and booking removed (no remaining services)', data: { bookingId, serviceId, bookingDeleted: true } });
+//     }
+
+//     // Recompute totals after removal
+//     booking.totalAmount = booking.services.reduce((sum, s) => sum + s.price, 0);
+//     booking.totalDuration = booking.services.reduce((sum, s) => sum + s.duration, 0);
+//     booking.finalAmount = booking.totalAmount - (booking.discountAmount || 0) + (booking.taxAmount || 0);
+//     await booking.save();
+
+//     return res.json({ success: true, message: 'Service deleted from booking', data: { bookingId, serviceId, bookingDeleted: false } });
+//   } catch (error) {
+//     console.error('Error deleting service from booking:', error);
+//     res.status(500).json({ success: false, message: 'Failed to delete service from booking' });
+//   }
+// };
+
+// // Delete booking (admin / employee via canManageBookings route)
+// const deleteBooking = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const booking = await Booking.findById(id);
+//     if (!booking) {
+//       return res.status(404).json({ success: false, message: 'Booking not found' });
+//     }
+
+//     await Booking.findByIdAndDelete(id);
+//     return res.json({ success: true, message: 'Booking deleted successfully', data: { bookingId: id } });
+//   } catch (error) {
+//     console.error('Error deleting booking:', error);
+//     res.status(500).json({ success: false, message: 'Failed to delete booking' });
+//   }
+// };
+
+// // ========================================
+// // HELPER FUNCTIONS
+// // ========================================
+
+// // Generate time slots based on work schedule
+// const generateTimeSlots = (schedule, serviceDuration, date) => {
+//   const slots = [];
+  
+//   // Handle both shiftsData array and single startTime/endTime
+//   let workingPeriods = [];
+  
+//   if (schedule?.shiftsData && Array.isArray(schedule.shiftsData) && schedule.shiftsData.length > 0) {
+//     // Use shiftsData array (admin format) - PRIORITY
+//     workingPeriods = schedule.shiftsData.map(shift => ({
+//       startTime: shift.startTime,
+//       endTime: shift.endTime
+//     }));
+//     console.log('🕒 Using shiftsData array for time generation:', workingPeriods);
+//   } else if (schedule?.startTime && schedule?.endTime && schedule?.isWorking) {
+//     // Use single startTime/endTime (fallback)
+//     workingPeriods = [{
+//       startTime: schedule.startTime,
+//       endTime: schedule.endTime
+//     }];
+//     console.log('🕒 Using startTime/endTime for time generation:', workingPeriods);
+//   }
+  
+//   // Generate slots for each working period
+//   workingPeriods.forEach(period => {
+//     // ✅ TIMEZONE FIX: Create UTC times to match frontend expectations
+//     // Frontend expects UTC times, so we create them as UTC from the start
+//     const startTime = new Date(`${date}T${period.startTime}:00.000Z`);
+//     const endTime = new Date(`${date}T${period.endTime}:00.000Z`);
+    
+//     let currentTime = new Date(startTime);
+    
+//     while (currentTime < endTime) {
+//       // Use fixed 15-minute slot duration to generate all possible slots
+//       // The actual service duration will be handled at booking validation time
+//       const slotDuration = 15; // Fixed 15-minute slots
+//       const slotEnd = new Date(currentTime.getTime() + slotDuration * 60 * 1000);
+      
+//       // Generate slots as long as the slot start time is within the shift
+//       if (currentTime < endTime) {
+//         // ✅ TIMEZONE FIX: Format time using UTC methods to ensure consistency
+//         const hours = currentTime.getUTCHours().toString().padStart(2, '0');
+//         const minutes = currentTime.getUTCMinutes().toString().padStart(2, '0');
+//         const timeString = `${hours}:${minutes}`;
+        
+//         slots.push({
+//           time: timeString,
+//           startTime: currentTime.toISOString(),
+//           endTime: slotEnd.toISOString(),
+//           available: true
+//         });
+//       }
+
+//       // ✅ CHANGED: Use 15-minute intervals instead of 30-minute
+//       currentTime = new Date(currentTime.getTime() + 15 * 60 * 1000); // 15-minute intervals
+//     }
+//   });
+  
+//   console.log('🕒 Generated', slots.length, 'time slots with 15-minute intervals (UTC)');
+//   return slots;
+// };
+
+// // Generate confirmation ID
+// const generateConfirmationId = () => {
+//   return 'CONF_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+// };
+
+// module.exports = {
+//   // Public routes
+//   getAvailableServices,
+//   getAvailableProfessionals,
+//   getAvailableTimeSlots,
+//   createBookingConfirmation,
+  
+//   // Authenticated routes
+//   createBooking,
+//   getUserBookings,
+//   getBooking,
+//   cancelBooking,
+//   rescheduleBooking,
+//   completeBooking,
+  
+//   // Admin routes
+//   getAllBookings,
+//   updateBooking,
+//   updateServiceStatus,
+//   deleteServiceFromBooking,
+//   deleteBooking
+// };
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const Booking = require('../models/Booking');
 const Service = require('../models/Service');
 const Employee = require('../models/Employee');
@@ -556,7 +2542,10 @@ const createBooking = async (req, res) => {
       console.log(`🔍 Processing service ${serviceDoc.name}:`, {
         rawStartTime: raw.startTime,
         rawEndTime: raw.endTime,
-        rawEmployee: raw.employee
+        rawEmployee: raw.employee,
+        rawPrice: raw.price,
+        customPrice: raw.customPrice,
+        originalPrice: raw.originalPrice
       });
       
       // Determine start/end times (use provided or default sequential based on provided)
@@ -612,19 +2601,48 @@ const createBooking = async (req, res) => {
         bookingsByEmployee.get(String(employeeId)).push({ start: startTime, end: endTime });
       }
 
+      // Handle custom pricing - if customPrice is provided, use it; otherwise use the original price
+      const originalPrice = raw.originalPrice ?? serviceDoc.price;
+      const finalPrice = raw.customPrice ?? raw.price ?? serviceDoc.price;
+      const priceDiscount = (raw.customPrice !== undefined && raw.customPrice !== null) 
+        ? (originalPrice - raw.customPrice)
+        : 0;
+
       transformedServices.push({
         service: serviceDoc._id,
+        serviceName: serviceDoc.name,
         employee: new mongoose.Types.ObjectId(employeeId), // Convert string to ObjectId for proper population
-        price: serviceDoc.price,
+        price: finalPrice,  // The final price (edited or original)
+        originalPrice: originalPrice,  // The original service price
+        customPrice: raw.customPrice ?? null,  // If admin edited the price
+        priceDiscount: priceDiscount,  // The discount amount if edited
         duration: serviceDoc.duration,
         startTime,
         endTime,
         notes: raw.notes || ''
       });
+
+      console.log(`✅ Service transformed:`, {
+        serviceName: serviceDoc.name,
+        originalPrice,
+        finalPrice,
+        customPrice: raw.customPrice ?? null,
+        priceDiscount
+      });
     }
 
     const totalAmount = transformedServices.reduce((sum, s) => sum + s.price, 0);
     const totalDuration = transformedServices.reduce((sum, s) => sum + s.duration, 0);
+    
+    // Log custom pricing information
+    const customPricedServices = transformedServices.filter(s => s.customPrice !== null && s.customPrice !== undefined);
+    if (customPricedServices.length > 0) {
+      console.log('💰 CUSTOM SERVICE PRICES DETECTED:');
+      customPricedServices.forEach(s => {
+        console.log(`   - ${s.serviceName}: AED ${s.originalPrice} → AED ${s.customPrice} (Discount: AED ${s.priceDiscount})`);
+      });
+      console.log(`💰 Total Discount from Service Pricing: AED ${customPricedServices.reduce((sum, s) => sum + s.priceDiscount, 0)}`);
+    }
 
     // console.log('Creating booking (multi-service) client:', clientUser._id, 'services:', transformedServices.length, 'mode:', selectionMode);
 
@@ -1111,8 +3129,18 @@ const getBooking = async (req, res) => {
     const userId = req.user._id;
 
     const booking = await Booking.findOne({ _id: id, client: userId })
-      .populate('services.service', 'name price duration')
-      .populate('services.employee', 'user position');
+      .populate('services.service', 'name price duration')  // Populate service details but still return all services subdocument fields
+      .populate({
+        path: 'services.employee',
+        model: 'Employee',
+        select: 'user position employeeId',
+        populate: {
+          path: 'user',
+          model: 'User',
+          select: 'firstName lastName email'
+        }
+      })
+      .lean(false);  // Ensure we get full document with all fields, not just projection
 
     if (!booking) {
       return res.status(404).json({
@@ -1121,12 +3149,75 @@ const getBooking = async (req, res) => {
       });
     }
 
+    // Ensure all service fields are included in the response
+    const bookingData = booking.toObject ? booking.toObject() : booking;
+    
+    console.log('📖 Booking retrieved for client:', userId);
+    console.log('   Services with custom pricing:', bookingData.services?.map(s => ({
+      serviceName: s.serviceName,
+      originalPrice: s.originalPrice,
+      customPrice: s.customPrice,
+      priceDiscount: s.priceDiscount
+    })));
+
     res.json({
       success: true,
-      data: { booking }
+      data: { booking: bookingData }
     });
   } catch (error) {
     console.error('Error fetching booking:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch booking'
+    });
+  }
+};
+
+// Admin endpoint to fetch a specific booking (without user/client restriction)
+const getAdminBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const booking = await Booking.findById(id)
+      .populate('services.service', 'name price duration')  // Populate service details
+      .populate({
+        path: 'services.employee',
+        model: 'Employee',
+        select: 'user position employeeId',
+        populate: {
+          path: 'user',
+          model: 'User',
+          select: 'firstName lastName email'
+        }
+      })
+      .populate('client', 'firstName lastName email phone')
+      .lean(false);  // Ensure we get full document with all fields
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
+      });
+    }
+
+    // Ensure all service fields are included in the response
+    const bookingData = booking.toObject ? booking.toObject() : booking;
+    
+    console.log('📖 Admin retrieved booking:', id);
+    console.log('   Services with custom pricing:', bookingData.services?.map(s => ({
+      serviceName: s.serviceName,
+      originalPrice: s.originalPrice,
+      customPrice: s.customPrice,
+      priceDiscount: s.priceDiscount,
+      price: s.price
+    })));
+
+    res.json({
+      success: true,
+      data: { booking: bookingData }
+    });
+  } catch (error) {
+    console.error('Error fetching admin booking:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch booking'
@@ -1545,7 +3636,22 @@ const getAllBookings = async (req, res) => {
             }
           }
 
-          return service;
+          // Ensure custom pricing fields are included
+          return {
+            ...service,
+            serviceName: service.serviceName || service.service?.name || 'Unknown Service',
+            price: service.price,
+            originalPrice: service.originalPrice !== undefined ? service.originalPrice : service.price,
+            customPrice: service.customPrice || null,
+            priceDiscount: service.priceDiscount || 0,
+            service: service.service,
+            employee: service.employee,
+            duration: service.duration,
+            startTime: service.startTime,
+            endTime: service.endTime,
+            status: service.status,
+            notes: service.notes
+          };
         });
       }
 
@@ -1962,9 +4068,11 @@ module.exports = {
   
   // Admin routes
   getAllBookings,
+  getAdminBooking,
   updateBooking,
   updateServiceStatus,
   deleteServiceFromBooking,
   deleteBooking
 };
+
 
