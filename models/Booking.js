@@ -31,7 +31,7 @@ const bookingSchema = new mongoose.Schema({
     price: {
       type: Number,
       required: [true, 'Service price is required'],
-      min: [0, 'Price cannot be negative']
+      // min: [0, 'Price cannot be negative']
     },
     duration: {
       type: Number,
@@ -64,21 +64,21 @@ const bookingSchema = new mongoose.Schema({
   totalAmount: {
     type: Number,
     required: [true, 'Total amount is required'],
-    min: [0, 'Total amount cannot be negative']
+    // min: [0, 'Total amount cannot be negative']
   },
   discountAmount: {
     type: Number,
     default: 0,
-    min: [0, 'Discount amount cannot be negative']
+    // min: [0, 'Discount amount cannot be negative']
   },
   customDiscount: {
     type: Number,
     default: 0,
-    min: [0, 'Custom discount cannot be negative']
+    // min: [0, 'Custom discount cannot be negative']
   },
   discountedTotal: {
     type: Number,
-    min: [0, 'Discounted total cannot be negative']
+    // min: [0, 'Discounted total cannot be negative']
   },
   taxAmount: {
     type: Number,
@@ -88,7 +88,7 @@ const bookingSchema = new mongoose.Schema({
   finalAmount: {
     type: Number,
     required: [true, 'Final amount is required'],
-    min: [0, 'Final amount cannot be negative']
+    // min: [0, 'Final amount cannot be negative']
   },
   paymentStatus: {
     type: String,
