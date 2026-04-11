@@ -1,5 +1,7 @@
 const User = require('../models/User');
 const Booking = require('../models/Booking');
+const GiftCard = require('../models/GiftCard');
+const Membership = require('../models/Membership');
 const Service = require('../models/Service');
 const Employee = require('../models/Employee');
 const Attendance = require('../models/Attendance');
@@ -434,46 +436,252 @@ const getEmployeeAnalytics = catchAsync(async (req, res, next) => {
   });
 });
 
-// Fetch documents from the finance_summary collection (admin/staff)
+// ─── Helper: zero-filled day entry ──────────────────────────────────────────
+const createEmptyDay = ({ year, month, day }) => {
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T00:00:00.000Z`;
+  return {
+    date: dateStr,
+    serviceCharges: 0,
+    tips: 0,
+    netOtherSales: 0,
+    taxOnOtherSales: 0,
+    totalOtherSales: 0,
+    totalSalesOtherSales: 0,
+    salesPaidInPeriod: 0,
+    unpaidSalesInPeriod: 0,
+    card: 0,
+    cash: 0,
+    freshaOnline: 0,
+    paymentLink: 0,
+    totalPayments: 0,
+    paymentsForSalesInPeriod: 0,
+    paymentsForSalesInPreviousPeriods: 0,
+    upfrontPayments: 0,
+    upfrontPaymentRedemption: 0,
+    giftCardRedemption: 0,
+    totalRedemptions: 0,
+    redemptionsForSalesInPeriod: 0,
+    redemptionsForSalesInPreviousPeriods: 0
+  };
+};
+
+// ─── Helper: build a consistent YYYY-MM-DD string from an _id group key ──────
+const toDateKey = ({ year, month, day }) =>
+  `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+// Compute Finance Summary from live booking, gift-card and membership data.
+// Groups all metrics by calendar day (Asia/Dubai timezone) and returns one
+// object per day in the requested date range.
 const getFinanceSummary = catchAsync(async (req, res, next) => {
-  // Query params: startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), limit, skip, sortBy, order
-  const { startDate, endDate, limit = 200, skip = 0, sortBy = 'date', order = 'desc', all = 'false' } = req.query;
+  const {
+    startDate,
+    endDate,
+    all = 'false',
+    timezone = 'Asia/Dubai'
+  } = req.query;
 
-  const filter = {};
-  if (startDate || endDate) {
-    filter.date = {};
-    if (startDate) {
-      const sd = new Date(startDate);
-      sd.setHours(0,0,0,0);
-      filter.date.$gte = sd;
-    }
-    if (endDate) {
-      const ed = new Date(endDate);
-      ed.setHours(23,59,59,999);
-      filter.date.$lte = ed;
-    }
+  // ── Build appointment-date filter ────────────────────────────────────────
+  let dateFilter = {};
+  if (startDate) {
+    const sd = new Date(startDate);
+    sd.setHours(0, 0, 0, 0);
+    dateFilter.$gte = sd;
+  }
+  if (endDate) {
+    const ed = new Date(endDate);
+    ed.setHours(23, 59, 59, 999);
+    dateFilter.$lte = ed;
+  }
+  // Default: last 30 days when no range is given and all !== true
+  if (!startDate && !endDate && String(all).toLowerCase() !== 'true') {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setHours(0, 0, 0, 0);
+    dateFilter.$gte = thirtyDaysAgo;
   }
 
-  // Access raw collection - useful for documents inserted outside Mongoose models
-  const collection = mongoose.connection.collection('finance_summary');
+  const hasDateFilter = Object.keys(dateFilter).length > 0;
+  const appointmentMatch = hasDateFilter ? { appointmentDate: dateFilter } : {};
 
-  const sortOrder = order === 'asc' ? 1 : -1;
-  // If client explicitly requests all=true, bypass the 1000 cap (use with caution)
-  let results;
-  // Count total matching documents (useful for paging and verification)
-  let totalRecords = await collection.countDocuments(filter);
+  // ── PIPELINE 1 — Booking metrics (Sales + Payments sections) ────────────
+  const bookingAgg = await Booking.aggregate([
+    {
+      $match: {
+        status: 'completed',
+        ...appointmentMatch
+      }
+    },
+    {
+      $group: {
+        _id: {
+          year:  { $year:  { date: '$appointmentDate', timezone } },
+          month: { $month: { date: '$appointmentDate', timezone } },
+          day:   { $dayOfMonth: { date: '$appointmentDate', timezone } }
+        },
+        // ─ Sales ─
+        serviceCharges: { $sum: '$finalAmount' },
+        tips:           { $sum: { $ifNull: ['$checkOut.tips', 0] } },
+        taxOnOtherSales:{ $sum: { $ifNull: ['$taxAmount', 0] } },
+        // ─ Payment methods ─
+        card: {
+          $sum: { $cond: [{ $eq: ['$paymentMethod', 'card'] }, '$finalAmount', 0] }
+        },
+        cash: {
+          $sum: { $cond: [{ $eq: ['$paymentMethod', 'cash'] }, '$finalAmount', 0] }
+        },
+        freshaOnline: {
+          $sum: {
+            $cond: [
+              { $in: ['$paymentMethod', ['online', 'bank-transfer']] },
+              '$finalAmount', 0
+            ]
+          }
+        },
+        paymentLink: {
+          $sum: { $cond: [{ $eq: ['$paymentMethod', 'wallet'] }, '$finalAmount', 0] }
+        },
+        // ─ Payment timing ─
+        salesPaidInPeriod: {
+          $sum: { $cond: [{ $eq: ['$paymentStatus', 'paid'] }, '$finalAmount', 0] }
+        },
+        unpaidSalesInPeriod: {
+          $sum: {
+            $cond: [
+              { $in: ['$paymentStatus', ['pending', 'partial']] },
+              '$finalAmount', 0
+            ]
+          }
+        },
+        // ─ Membership redemptions ─
+        upfrontPaymentRedemption: {
+          $sum: {
+            $cond: [
+              { $eq: ['$paymentMethod', 'membership'] },
+              { $ifNull: ['$paymentDetails.paidAmount', '$finalAmount'] },
+              0
+            ]
+          }
+        }
+      }
+    },
+    // Compute derived totals inside the pipeline
+    {
+      $addFields: {
+        date: {
+          $dateFromParts: {
+            year: '$_id.year', month: '$_id.month', day: '$_id.day',
+            timezone
+          }
+        },
+        totalOtherSales:      { $ifNull: ['$taxOnOtherSales', 0] },
+        totalSalesOtherSales: { $add: ['$serviceCharges', '$tips', { $ifNull: ['$taxOnOtherSales', 0] }] },
+        totalPayments:        { $add: ['$card', '$cash', '$freshaOnline', '$paymentLink'] }
+      }
+    }
+  ]);
 
-  if (String(all).toLowerCase() === 'true') {
-    console.warn('Admin requested all finance_summary documents in one response. This may consume a lot of memory.');
-    results = await collection.find(filter).sort({ [sortBy]: sortOrder }).toArray();
-  } else {
-    const cursor = collection.find(filter).sort({ [sortBy]: sortOrder }).skip(parseInt(skip, 10)).limit(Math.min(parseInt(limit, 10), 1000));
-    results = await cursor.toArray();
-  }
+  // ── PIPELINE 2 — Gift card redemptions ──────────────────────────────────
+  const gcMatch = hasDateFilter ? { 'usageHistory.usedDate': dateFilter } : {};
+
+  const giftCardAgg = await GiftCard.aggregate([
+    { $unwind: '$usageHistory' },
+    { $match: gcMatch },
+    {
+      $group: {
+        _id: {
+          year:  { $year:  { date: '$usageHistory.usedDate', timezone } },
+          month: { $month: { date: '$usageHistory.usedDate', timezone } },
+          day:   { $dayOfMonth: { date: '$usageHistory.usedDate', timezone } }
+        },
+        giftCardRedemption: { $sum: '$usageHistory.amountUsed' }
+      }
+    }
+  ]);
+
+  // ── PIPELINE 3 — Membership upfront payments ─────────────────────────────
+  const memMatch = hasDateFilter ? { purchaseDate: dateFilter } : {};
+
+  const membershipAgg = await Membership.aggregate([
+    {
+      $match: {
+        isTemplate: false,
+        ...memMatch
+      }
+    },
+    {
+      $group: {
+        _id: {
+          year:  { $year:  { date: '$purchaseDate', timezone } },
+          month: { $month: { date: '$purchaseDate', timezone } },
+          day:   { $dayOfMonth: { date: '$purchaseDate', timezone } }
+        },
+        upfrontPayments: { $sum: '$price' }
+      }
+    }
+  ]);
+
+  // ── MERGE all three pipelines by date key ────────────────────────────────
+  const dayMap = new Map();
+
+  // Seed map from booking aggregation (primary data source)
+  bookingAgg.forEach(row => {
+    const key = toDateKey(row._id);
+    const upfrontRed = row.upfrontPaymentRedemption || 0;
+    dayMap.set(key, {
+      date:                              row.date ? row.date.toISOString() : `${key}T00:00:00.000Z`,
+      // Sales
+      serviceCharges:                    row.serviceCharges              || 0,
+      tips:                              row.tips                        || 0,
+      netOtherSales:                     0,
+      taxOnOtherSales:                   row.taxOnOtherSales             || 0,
+      totalOtherSales:                   row.totalOtherSales             || 0,
+      totalSalesOtherSales:              row.totalSalesOtherSales        || 0,
+      salesPaidInPeriod:                 row.salesPaidInPeriod           || 0,
+      unpaidSalesInPeriod:               row.unpaidSalesInPeriod         || 0,
+      // Payments
+      card:                              row.card                        || 0,
+      cash:                              row.cash                        || 0,
+      freshaOnline:                      row.freshaOnline                || 0,
+      paymentLink:                       row.paymentLink                 || 0,
+      totalPayments:                     row.totalPayments               || 0,
+      paymentsForSalesInPeriod:          row.salesPaidInPeriod           || 0,
+      paymentsForSalesInPreviousPeriods: 0,
+      upfrontPayments:                   0,   // filled from membership pipeline
+      // Redemptions
+      upfrontPaymentRedemption:          upfrontRed,
+      giftCardRedemption:                0,   // filled from giftCard pipeline
+      totalRedemptions:                  upfrontRed,
+      redemptionsForSalesInPeriod:       upfrontRed,
+      redemptionsForSalesInPreviousPeriods: 0
+    });
+  });
+
+  // Merge gift card redemptions
+  giftCardAgg.forEach(gc => {
+    const key = toDateKey(gc._id);
+    const row = dayMap.get(key) || createEmptyDay(gc._id);
+    const gcAmount = gc.giftCardRedemption || 0;
+    row.giftCardRedemption             = gcAmount;
+    row.totalRedemptions               = (row.upfrontPaymentRedemption || 0) + gcAmount;
+    row.redemptionsForSalesInPeriod    = row.totalRedemptions;
+    dayMap.set(key, row);
+  });
+
+  // Merge membership upfront payments
+  membershipAgg.forEach(m => {
+    const key = toDateKey(m._id);
+    const row = dayMap.get(key) || createEmptyDay(m._id);
+    row.upfrontPayments = m.upfrontPayments || 0;
+    dayMap.set(key, row);
+  });
+
+  // Sort newest-first (mirrors the old collection sort)
+  const results = Array.from(dayMap.values())
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
 
   res.status(200).json({
     success: true,
-    totalRecords,
+    totalRecords: results.length,
     returnedCount: results.length,
     data: results
   });
