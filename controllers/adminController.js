@@ -482,15 +482,20 @@ const getFinanceSummary = catchAsync(async (req, res, next) => {
 
   // ── Build appointment-date filter ────────────────────────────────────────
   let dateFilter = {};
+  let effectiveStart = null;
+  let effectiveEnd = null;
+
   if (startDate) {
     const sd = new Date(startDate);
     sd.setHours(0, 0, 0, 0);
     dateFilter.$gte = sd;
+    effectiveStart = new Date(sd);
   }
   if (endDate) {
     const ed = new Date(endDate);
     ed.setHours(23, 59, 59, 999);
     dateFilter.$lte = ed;
+    effectiveEnd = new Date(ed);
   }
   // Default: last 30 days when no range is given and all !== true
   if (!startDate && !endDate && String(all).toLowerCase() !== 'true') {
@@ -498,6 +503,11 @@ const getFinanceSummary = catchAsync(async (req, res, next) => {
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     thirtyDaysAgo.setHours(0, 0, 0, 0);
     dateFilter.$gte = thirtyDaysAgo;
+    effectiveStart = new Date(thirtyDaysAgo);
+    
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    effectiveEnd = new Date(today);
   }
 
   const hasDateFilter = Object.keys(dateFilter).length > 0;
@@ -541,8 +551,18 @@ const getFinanceSummary = catchAsync(async (req, res, next) => {
           $sum: { $cond: [{ $eq: ['$paymentMethod', 'wallet'] }, '$finalAmount', 0] }
         },
         // ─ Payment timing ─
+        // salesPaidInPeriod = only card/cash (direct, in-person payments)
+        // online/wallet/membership/giftcard are upfront redemptions – excluded here
         salesPaidInPeriod: {
-          $sum: { $cond: [{ $eq: ['$paymentStatus', 'paid'] }, '$finalAmount', 0] }
+          $sum: {
+            $cond: [
+              { $and: [
+                { $in: ['$paymentMethod', ['card', 'cash']] },
+                { $eq: ['$paymentStatus', 'paid'] }
+              ]},
+              '$finalAmount', 0
+            ]
+          }
         },
         unpaidSalesInPeriod: {
           $sum: {
@@ -552,12 +572,14 @@ const getFinanceSummary = catchAsync(async (req, res, next) => {
             ]
           }
         },
-        // ─ Membership redemptions ─
+        // ─ Upfront redemptions ─
+        // Any booking settled via a pre-paid method (online, membership, gift card, wallet)
+        // is a redemption of a previously received upfront payment.
         upfrontPaymentRedemption: {
           $sum: {
             $cond: [
-              { $eq: ['$paymentMethod', 'membership'] },
-              { $ifNull: ['$paymentDetails.paidAmount', '$finalAmount'] },
+              { $in: ['$paymentMethod', ['online', 'bank-transfer', 'wallet', 'membership', 'giftcard']] },
+              '$finalAmount',
               0
             ]
           }
@@ -623,55 +645,83 @@ const getFinanceSummary = catchAsync(async (req, res, next) => {
   // ── MERGE all three pipelines by date key ────────────────────────────────
   const dayMap = new Map();
 
-  // Seed map from booking aggregation (primary data source)
+  // Pre-fill the dayMap so every single day in the requested range exists (avoids missing dates)
+  if (effectiveStart && effectiveEnd) {
+    const curr = new Date(effectiveStart);
+    curr.setHours(0, 0, 0, 0);
+    const end = new Date(effectiveEnd);
+    end.setHours(23, 59, 59, 999);
+
+    while (curr <= end) {
+      const yr = curr.getFullYear();
+      const mo = curr.getMonth() + 1;
+      const da = curr.getDate();
+      const key = toDateKey({ year: yr, month: mo, day: da });
+      
+      dayMap.set(key, createEmptyDay({ year: yr, month: mo, day: da }));
+      curr.setDate(curr.getDate() + 1);
+    }
+  }
+
+  // Merge booking aggregation (primary data source) into the pre-filled map
   bookingAgg.forEach(row => {
-    const key = toDateKey(row._id);
-    const upfrontRed = row.upfrontPaymentRedemption || 0;
-    dayMap.set(key, {
-      date:                              row.date ? row.date.toISOString() : `${key}T00:00:00.000Z`,
-      // Sales
-      serviceCharges:                    row.serviceCharges              || 0,
-      tips:                              row.tips                        || 0,
-      netOtherSales:                     0,
-      taxOnOtherSales:                   row.taxOnOtherSales             || 0,
-      totalOtherSales:                   row.totalOtherSales             || 0,
-      totalSalesOtherSales:              row.totalSalesOtherSales        || 0,
-      salesPaidInPeriod:                 row.salesPaidInPeriod           || 0,
-      unpaidSalesInPeriod:               row.unpaidSalesInPeriod         || 0,
-      // Payments
-      card:                              row.card                        || 0,
-      cash:                              row.cash                        || 0,
-      freshaOnline:                      row.freshaOnline                || 0,
-      paymentLink:                       row.paymentLink                 || 0,
-      totalPayments:                     row.totalPayments               || 0,
-      paymentsForSalesInPeriod:          row.salesPaidInPeriod           || 0,
-      paymentsForSalesInPreviousPeriods: 0,
-      upfrontPayments:                   0,   // filled from membership pipeline
-      // Redemptions
-      upfrontPaymentRedemption:          upfrontRed,
-      giftCardRedemption:                0,   // filled from giftCard pipeline
-      totalRedemptions:                  upfrontRed,
-      redemptionsForSalesInPeriod:       upfrontRed,
-      redemptionsForSalesInPreviousPeriods: 0
-    });
+    const key          = toDateKey(row._id);
+    const upfrontRed   = row.upfrontPaymentRedemption || 0;
+    const freshaAmt    = row.freshaOnline             || 0;
+    const linkAmt      = row.paymentLink              || 0;
+
+    // Booking-level upfront payments = money received via online/wallet/link
+    // (pre-paid at booking time, not collected at the counter)
+    const bookingUpfront = freshaAmt + linkAmt;
+
+    const existing = dayMap.get(key) || createEmptyDay(row._id);
+
+    existing.date                              = row.date ? row.date.toISOString() : existing.date;
+    // ── Sales ──
+    existing.serviceCharges                    = row.serviceCharges     || 0;
+    existing.tips                              = row.tips               || 0;
+    // netOtherSales left as 0 directly on empty day
+    existing.taxOnOtherSales                   = row.taxOnOtherSales    || 0;
+    existing.totalOtherSales                   = row.totalOtherSales    || 0;
+    existing.totalSalesOtherSales              = row.totalSalesOtherSales || 0;
+    existing.salesPaidInPeriod                 = row.salesPaidInPeriod  || 0;
+    existing.unpaidSalesInPeriod               = row.unpaidSalesInPeriod || 0;
+    // ── Payments ──
+    existing.card                              = row.card           || 0;
+    existing.cash                              = row.cash           || 0;
+    existing.freshaOnline                      = freshaAmt;
+    existing.paymentLink                       = linkAmt;
+    existing.totalPayments                     = row.totalPayments  || 0;
+    existing.paymentsForSalesInPeriod          = row.salesPaidInPeriod || 0;
+    // paymentsForSalesInPreviousPeriods left as 0 map seed
+    existing.upfrontPayments                   = bookingUpfront;
+    // ── Redemptions ──
+    existing.upfrontPaymentRedemption          = upfrontRed;
+    // giftCardRedemption is filled later
+    existing.totalRedemptions                  = upfrontRed;
+    existing.redemptionsForSalesInPeriod       = upfrontRed;
+    // redemptionsForSalesInPreviousPeriods left as 0 direct map
+    
+    dayMap.set(key, existing);
   });
 
-  // Merge gift card redemptions
+  // Merge gift card redemptions (from GiftCard.usageHistory)
   giftCardAgg.forEach(gc => {
-    const key = toDateKey(gc._id);
-    const row = dayMap.get(key) || createEmptyDay(gc._id);
-    const gcAmount = gc.giftCardRedemption || 0;
-    row.giftCardRedemption             = gcAmount;
-    row.totalRedemptions               = (row.upfrontPaymentRedemption || 0) + gcAmount;
-    row.redemptionsForSalesInPeriod    = row.totalRedemptions;
+    const key    = toDateKey(gc._id);
+    const row    = dayMap.get(key) || createEmptyDay(gc._id);
+    const gcAmt  = gc.giftCardRedemption || 0;
+    row.giftCardRedemption          = gcAmt;
+    row.totalRedemptions            = (row.upfrontPaymentRedemption || 0) + gcAmt;
+    row.redemptionsForSalesInPeriod = row.totalRedemptions;
     dayMap.set(key, row);
   });
 
-  // Merge membership upfront payments
+  // Merge membership upfront payments (new memberships purchased on this day)
+  // Added on top of booking-level upfronts (freshaOnline + paymentLink)
   membershipAgg.forEach(m => {
     const key = toDateKey(m._id);
     const row = dayMap.get(key) || createEmptyDay(m._id);
-    row.upfrontPayments = m.upfrontPayments || 0;
+    row.upfrontPayments = (row.upfrontPayments || 0) + (m.upfrontPayments || 0);
     dayMap.set(key, row);
   });
 
