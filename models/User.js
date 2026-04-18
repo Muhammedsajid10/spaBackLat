@@ -32,7 +32,7 @@ const userSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: function() {
+    required: function () {
       // Password is required unless user has social auth
       return !this.socialAuth || (!this.socialAuth.facebook && !this.socialAuth.google);
     },
@@ -41,27 +41,19 @@ const userSchema = new mongoose.Schema({
   },
   phone: {
     type: String,
-    // required: [true, 'Phone number is required'],
-    // validate: {
-    //   validator: function(v) {
-    //     // Allow empty/null phone numbers, but validate format if provided
-    //     if (!v || v.trim() === '') return true;
-    //     return /^[\+]?[1-9][\d]{0,15}$/.test(v);
-    //   },
-    //   message: 'Please enter a valid phone number'
-    // }
+
   },
   dateOfBirth: {
     type: Date
   },
   gender: {
     type: String,
-enum: ['',"Male", "Female", "Non-binary", "Prefer not to say",'male','female','other'],
+    enum: ['', "Male", "Female", "Non-binary", "Prefer not to say", 'male', 'female', 'other'],
     default: 'other'
   },
   pronouns: {
     type: String,
-    enum: ['','He/Him', 'She/Her', 'They/Them', 'Not specified'],
+    enum: ['', 'He/Him', 'She/Her', 'They/Them', 'Not specified'],
     default: 'Not specified'
   },
   address: {
@@ -123,7 +115,7 @@ enum: ['',"Male", "Female", "Non-binary", "Prefer not to say",'male','female','o
 });
 
 // Virtual for full name
-userSchema.virtual('fullName').get(function() {
+userSchema.virtual('fullName').get(function () {
   return `${this.firstName} ${this.lastName}`;
 });
 
@@ -133,20 +125,20 @@ userSchema.index({ role: 1 });
 userSchema.index({ isActive: 1 });
 
 // Pre-save middleware to hash password
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
-  
+
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
 // Instance method to check password
-userSchema.methods.correctPassword = async function(candidatePassword, userPassword) {
+userSchema.methods.correctPassword = async function (candidatePassword, userPassword) {
   return await bcrypt.compare(candidatePassword, userPassword);
 };
 
 // Instance method to check if password was changed after JWT was issued
-userSchema.methods.changedPasswordAfter = function(JWTTimestamp) {
+userSchema.methods.changedPasswordAfter = function (JWTTimestamp) {
   if (this.passwordChangedAt) {
     const changedTimestamp = parseInt(this.passwordChangedAt.getTime() / 1000, 10);
     return JWTTimestamp < changedTimestamp;
@@ -155,16 +147,16 @@ userSchema.methods.changedPasswordAfter = function(JWTTimestamp) {
 };
 
 // Instance method to create password reset token
-userSchema.methods.createPasswordResetToken = function() {
+userSchema.methods.createPasswordResetToken = function () {
   const resetToken = crypto.randomBytes(32).toString('hex');
-  
+
   this.passwordResetToken = crypto
     .createHash('sha256')
     .update(resetToken)
     .digest('hex');
-  
+
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
-  
+
   return resetToken;
 };
 

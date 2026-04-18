@@ -61,18 +61,25 @@ class APIFeatures {
 
 // Get all clients (admin/employee only) with optional batch id filtering (?ids=comma,separated)
 const getAllClients = catchAsync(async (req, res, next) => {
-  const { ids } = req.query;
-  let baseQuery;
+  const { ids, search, fields } = req.query;
+  let baseQuery = { role: 'client' };
+
   if (ids) {
     const idArray = ids.split(',').map(id => id.trim()).filter(Boolean);
     if (idArray.length) {
-      // When explicit ids requested, don't restrict by role so enrichment works even if role mismatch
       baseQuery = { _id: { $in: idArray } };
-    } else {
-      baseQuery = { role: 'client' };
     }
-  } else {
-    baseQuery = { role: 'client' };
+  }
+
+  // Add search functionality
+  if (search) {
+    const searchRegex = new RegExp(search, 'i');
+    baseQuery.$or = [
+      { firstName: searchRegex },
+      { lastName: searchRegex },
+      { email: searchRegex },
+      { phone: searchRegex }
+    ];
   }
 
   // Get total count for pagination info
@@ -87,11 +94,17 @@ const getAllClients = catchAsync(async (req, res, next) => {
     .limitFields()
     .paginate();
 
+  // If specific fields are requested via 'fields' query param, APIFeatures handles it.
+  // Default fields for search view if search is active and no fields specified
+  if (search && !fields) {
+    features.query = features.query.select('firstName lastName phone email');
+  }
+
   const clients = await features.query;
 
   // Calculate pagination info
   const page = req.query.page * 1 || 1;
-  const limit = req.query.limit * 1 || 1000;
+  const limit = req.query.limit * 1 || 15;
   const totalPages = Math.ceil(totalClients / limit);
 
   res.status(200).json({

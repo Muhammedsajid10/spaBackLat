@@ -110,6 +110,9 @@ router.post('/confirmation', bookingController.createBookingConfirmation);
 // All routes below require authentication
 router.use(protect);
 
+// Admin preview endpoint used by the booking flow before final create
+router.post('/admin/preview', isAdmin, bookingController.previewAdminBooking);
+
 // Create booking
 router.post('/', bookingController.createBooking);
 
@@ -134,6 +137,9 @@ router.post('/complete', bookingController.completeBooking);
 
 // Admin can view all bookings
 router.get('/admin/all', isAdmin, bookingController.getAllBookings);
+
+// Optimized calendar view (aggregation)
+router.get('/calendar/view', isAdmin, bookingController.getCalendarView);
 
 // Admin can view a specific booking (with full details including custom pricing)
 router.get('/admin/:id', isAdmin, bookingController.getAdminBooking);
